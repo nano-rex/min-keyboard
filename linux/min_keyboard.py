@@ -180,7 +180,7 @@ class MinKeyboard(tk.Tk):
             self.text.insert("insert", self.composing)
             self.composing = ""
             self.refresh()
-        self.text.insert("insert", " ")
+        self.text.insert("insert", " " if self.mode == "english" else "\u3000")
 
     def enter(self):
         if self.composing:

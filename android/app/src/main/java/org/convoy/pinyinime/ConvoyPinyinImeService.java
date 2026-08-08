@@ -439,7 +439,7 @@ public class ConvoyPinyinImeService extends InputMethodService {
         } else {
             commitComposingForCurrentMode(ic);
         }
-        ic.commitText(" ", 1);
+        ic.commitText(inputMode == InputMode.ENGLISH ? " " : "\u3000", 1);
     }
 
     private void handleEnter(InputConnection ic) {
