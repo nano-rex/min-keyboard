@@ -43,9 +43,9 @@ python3 linux/min_keyboard.py
 ```
 
 Type in the Min Keyboard window. You can use either the physical keyboard or
-the on-screen keys. Type an abbreviation, then select a candidate with the
-mouse or press Space to commit the first candidate. Enter commits the current
-candidate and starts a new line.
+the on-screen keys. Recommendations are display-only until you explicitly
+click one. Space and Enter preserve the text you typed; they never
+auto-correct or auto-select a recommendation.
 
 Examples:
 

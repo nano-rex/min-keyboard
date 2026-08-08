@@ -176,11 +176,17 @@ class MinKeyboard(tk.Tk):
         self.refresh()
 
     def space(self):
-        if self.composing: self.commit(self.candidates[0] if self.candidates else self.composing)
+        if self.composing:
+            self.text.insert("insert", self.composing)
+            self.composing = ""
+            self.refresh()
         self.text.insert("insert", " ")
 
     def enter(self):
-        if self.composing: self.commit(self.candidates[0] if self.candidates else self.composing)
+        if self.composing:
+            self.text.insert("insert", self.composing)
+            self.composing = ""
+            self.refresh()
         self.text.insert("insert", "\n")
 
     def refresh(self):
