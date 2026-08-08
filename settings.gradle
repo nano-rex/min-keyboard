@@ -1,2 +1,2 @@
-rootProject.name = 'Convoy Pinyin IME'
+rootProject.name = 'Min Keyboard'
 include ':app'

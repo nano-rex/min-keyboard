@@ -2,6 +2,7 @@ package org.convoy.pinyinime;
 
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
 import android.os.Handler;
@@ -24,14 +25,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ConvoyPinyinImeService extends InputMethodService {
-    private static final int LIGHT_BG = Color.parseColor("#EAEAEA");
-    private static final int LIGHT_PANEL = Color.parseColor("#D8D8D8");
+    private static final int LIGHT_BG = Color.parseColor("#F5F5F5");
+    private static final int LIGHT_PANEL = Color.parseColor("#E5E5E5");
     private static final int LIGHT_TEXT = Color.parseColor("#111111");
-    private static final int LIGHT_ACTIVE = Color.parseColor("#B9DFFF");
+    private static final int LIGHT_ACTIVE = Color.parseColor("#C5E4FF");
     private static final int DARK_BG = Color.parseColor("#1B1B1B");
-    private static final int DARK_PANEL = Color.parseColor("#2A2A2A");
+    private static final int DARK_PANEL = Color.parseColor("#303030");
     private static final int DARK_TEXT = Color.parseColor("#F2F2F2");
-    private static final int DARK_ACTIVE = Color.parseColor("#3A6F99");
+    private static final int DARK_ACTIVE = Color.parseColor("#426B8F");
 
     private enum InputMode {
         SIMPLIFIED,
@@ -678,7 +679,7 @@ public class ConvoyPinyinImeService extends InputMethodService {
 
     private void stylePressed(Button button) {
         boolean darkMode = ImePreferences.isDarkMode(this);
-        button.setBackgroundColor(darkMode ? DARK_ACTIVE : LIGHT_ACTIVE);
+        button.setBackground(keyBackground(darkMode ? DARK_ACTIVE : LIGHT_ACTIVE, darkMode ? Color.TRANSPARENT : Color.rgb(120, 170, 210)));
     }
 
     private boolean isRepeatableKey(String key) {
@@ -768,7 +769,8 @@ public class ConvoyPinyinImeService extends InputMethodService {
     private void styleButton(Button button) {
         boolean darkMode = ImePreferences.isDarkMode(this);
         button.setTextColor(darkMode ? DARK_TEXT : LIGHT_TEXT);
-        button.setBackgroundColor(darkMode ? DARK_PANEL : Color.WHITE);
+        button.setBackground(keyBackground(darkMode ? DARK_PANEL : Color.WHITE, darkMode ? Color.rgb(75, 75, 75) : Color.rgb(210, 210, 210)));
+        button.setPadding(dp(2), dp(2), dp(2), dp(2));
     }
 
     private void styleModeButton(Button button, boolean active, boolean darkMode) {
@@ -776,7 +778,21 @@ public class ConvoyPinyinImeService extends InputMethodService {
             return;
         }
         button.setTextColor(darkMode ? DARK_TEXT : LIGHT_TEXT);
-        button.setBackgroundColor(active ? (darkMode ? DARK_ACTIVE : LIGHT_ACTIVE) : (darkMode ? DARK_PANEL : Color.WHITE));
+        button.setBackground(keyBackground(active ? (darkMode ? DARK_ACTIVE : LIGHT_ACTIVE) : (darkMode ? DARK_PANEL : Color.WHITE), darkMode ? Color.rgb(75, 75, 75) : Color.rgb(180, 180, 180)));
+    }
+
+    private GradientDrawable keyBackground(int fill, int stroke) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fill);
+        drawable.setCornerRadius(dp(5));
+        if (stroke != Color.TRANSPARENT) {
+            drawable.setStroke(dp(1), stroke);
+        }
+        return drawable;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private String labelForCurrentMode() {

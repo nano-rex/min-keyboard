@@ -1,9 +1,9 @@
 <resources>
-    <string name="app_name">Convoy Pinyin</string>
-    <string name="setup_title">Convoy Pinyin</string>
-    <string name="setup_summary">Minimal offline keyboard inspired by Google Pinyin Input.</string>
+    <string name="app_name">Min Keyboard</string>
+    <string name="setup_title">Min Keyboard</string>
+    <string name="setup_summary">A minimal offline keyboard with English, Simplified Chinese, and Traditional Chinese input.</string>
     <string name="setup_step_enable">1. Enable the keyboard in system input settings.</string>
-    <string name="setup_step_select">2. Select Convoy Pinyin from the input method picker.</string>
+    <string name="setup_step_select">2. Select Min Keyboard from the input method picker.</string>
     <string name="open_input_settings">Open input settings</string>
     <string name="open_input_picker">Open input picker</string>
     <string name="setup_note">Core features only: offline pinyin candidates, Simplified/Traditional Chinese, English mode, punctuation, backspace, space, enter.</string>
