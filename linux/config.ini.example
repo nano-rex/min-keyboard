@@ -1,5 +1,5 @@
 [hotkeys]
-# Use X11/IBus key names. Restart the engine after changing this file.
+# Use Tkinter key names. Restart Min Keyboard after changing this file.
 mode = Control+F12
 english = Control+1
 simplified = Control+2
