@@ -93,8 +93,12 @@ class MinKeyboard(tk.Tk):
         self.preedit.pack(fill="x", padx=8)
         self.mode_bar = tk.Frame(self)
         self.mode_bar.pack(fill="x", padx=8, pady=3)
+        self.mode_buttons = tk.Frame(self.mode_bar)
+        self.mode_buttons.pack(side="left")
         self.candidate_bar = tk.Frame(self.mode_bar)
         self.candidate_bar.pack(side="left", fill="x", expand=True)
+        self.status = tk.Label(self.mode_bar, anchor="e")
+        self.status.pack(side="right")
         self.keyboard = tk.Frame(self)
         self.keyboard.pack(fill="x", padx=8, pady=(2, 8))
         self.build_mode_buttons()
@@ -107,12 +111,10 @@ class MinKeyboard(tk.Tk):
         return next((language for language in LANGUAGES if self.enabled.get(language, True)), "english")
 
     def build_mode_buttons(self):
-        for child in self.mode_bar.winfo_children(): child.destroy()
+        for child in self.mode_buttons.winfo_children(): child.destroy()
         for language in LANGUAGES:
-            button = tk.Button(self.mode_bar, text=LABELS[language], command=lambda item=language: self.set_mode(item), width=7)
+            button = tk.Button(self.mode_buttons, text=LABELS[language], command=lambda item=language: self.set_mode(item), width=7)
             button.pack(side="left", padx=2)
-        self.status = tk.Label(self.mode_bar, anchor="e")
-        self.status.pack(side="right", fill="x", expand=True)
 
     def bind_hotkeys(self):
         for sequence in tuple(self.bindings()): self.unbind(sequence)
