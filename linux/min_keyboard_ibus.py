@@ -31,6 +31,8 @@ def load_preferences(path, mode_override=None):
         "english": "Control+1",
         "simplified": "Control+2",
         "traditional": "Control+3",
+        "japanese": "Control+4",
+        "korean": "Control+5",
     }
     parser = configparser.ConfigParser()
     if path.exists():

@@ -2,7 +2,7 @@
 <component>
   <name>org.nanorex.MinKeyboard</name>
   <description>Min Keyboard offline English and Chinese input</description>
-  <exec>/usr/bin/python3 /usr/lib/min-keyboard/min_keyboard_ibus.py --ibus</exec>
+  <exec>/usr/bin/python3 /usr/lib/min-keyboard/min_keyboard_ibus.py</exec>
   <version>0.1</version>
   <author>nano-rex</author>
   <license>GPL-3.0-or-later</license>
