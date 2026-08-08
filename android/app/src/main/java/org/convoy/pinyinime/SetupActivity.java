@@ -23,6 +23,11 @@ public class SetupActivity extends Activity {
         Switch darkMode = findViewById(R.id.dark_mode_toggle);
         Switch autoCorrect = findViewById(R.id.auto_correct_toggle);
         Switch autoSpace = findViewById(R.id.auto_space_toggle);
+        bindLanguage(findViewById(R.id.language_english_toggle), "english");
+        bindLanguage(findViewById(R.id.language_simplified_toggle), "simplified");
+        bindLanguage(findViewById(R.id.language_traditional_toggle), "traditional");
+        bindLanguage(findViewById(R.id.language_japanese_toggle), "japanese");
+        bindLanguage(findViewById(R.id.language_korean_toggle), "korean");
 
         openSettings.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
         openPicker.setOnClickListener(this::showPicker);
@@ -40,6 +45,11 @@ public class SetupActivity extends Activity {
         autoSpace.setChecked(ImePreferences.isAutoSpaceEnabled(this));
         autoSpace.setOnCheckedChangeListener((buttonView, isChecked) ->
             ImePreferences.setAutoSpaceEnabled(this, isChecked));
+    }
+
+    private void bindLanguage(Switch control, String language) {
+        control.setChecked(ImePreferences.isLanguageEnabled(this, language));
+        control.setOnCheckedChangeListener((buttonView, isChecked) -> ImePreferences.setLanguageEnabled(this, language, isChecked));
     }
 
     private void showPicker(View ignored) {

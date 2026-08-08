@@ -50,6 +50,20 @@
             android:layout_marginTop="8dp"
             android:text="@string/auto_space" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/language_settings"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Switch android:id="@+id/language_english_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/language_english" />
+        <Switch android:id="@+id/language_simplified_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/language_simplified" />
+        <Switch android:id="@+id/language_traditional_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/language_traditional" />
+        <Switch android:id="@+id/language_japanese_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/language_japanese" />
+        <Switch android:id="@+id/language_korean_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/language_korean" />
+
         <Button
             android:id="@+id/open_input_settings"
             style="@style/Widget.ConvoyPinyin.KeyButton"

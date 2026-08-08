@@ -16,30 +16,10 @@
         <Button
             android:id="@+id/mode_switch"
             style="@style/Widget.ConvoyPinyin.KeyButton"
-            android:layout_width="64dp"
+            android:layout_width="52dp"
             android:layout_height="wrap_content"
             android:layout_marginEnd="4dp"
             android:text="@string/mode_cn" />
-
-        <TextView
-            android:id="@+id/composing_text"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="#D8D8D8"
-            android:ellipsize="end"
-            android:padding="8dp"
-            android:singleLine="true"
-            android:text="@string/composing_hint"
-            android:textSize="16sp" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingBottom="4dp">
 
         <Button
             android:id="@+id/candidate_prev"

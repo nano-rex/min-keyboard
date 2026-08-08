@@ -7,6 +7,7 @@ It supports:
 
 - English word suggestions and expansions such as `wdym` → `what do you mean`.
 - Simplified and Traditional Chinese pinyin candidates.
+- Japanese and Korean offline shortcut candidates.
 - Chinese abbreviations such as `bzd` → `不知道` / `不知道`.
 - `Ctrl+F12` to cycle English, Simplified Chinese, and Traditional Chinese by default.
 - User-configurable mode hotkeys, with direct English/Simplified/Traditional hotkeys.
@@ -55,11 +56,19 @@ mode = Control+F12
 english = Control+1
 simplified = Control+2
 traditional = Control+3
+
+[languages]
+english = true
+simplified = true
+traditional = true
+japanese = true
+korean = true
 ```
 
 Supported modifiers are `Control`, `Alt`, and `Shift`; keys can be letters,
 numbers, or names such as `F12`. Restart the IBus engine after changing the
-file. For a one-off mode-cycle hotkey, use:
+file. Set a language to `false` to remove it from the mode cycle and disable
+its direct hotkey. For a one-off mode-cycle hotkey, use:
 
 ```bash
 python3 linux/min_keyboard_ibus.py --hotkey Alt+F12

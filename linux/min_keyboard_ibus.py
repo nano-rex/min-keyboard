@@ -18,8 +18,11 @@ from gi.repository import GLib, IBus
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "android" / "app" / "src" / "main" / "assets"
+if not ASSETS.exists():
+    ASSETS = Path(__file__).resolve().parent / "assets"
 DEFAULT_CONFIG = Path.home() / ".config" / "min-keyboard" / "config.ini"
 ACTIVE_HOTKEYS = {}
+ACTIVE_LANGUAGES = {}
 
 
 def load_preferences(path, mode_override=None):
@@ -35,7 +38,21 @@ def load_preferences(path, mode_override=None):
         values.update(dict(parser.items("hotkeys")) if parser.has_section("hotkeys") else {})
     if mode_override:
         values["mode"] = mode_override
-    return {name: parse_hotkey(spec) for name, spec in values.items()}
+    languages = {
+        "english": True,
+        "simplified": True,
+        "traditional": True,
+        "japanese": True,
+        "korean": True,
+    }
+    if path.exists():
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        if parser.has_section("languages"):
+            for name in languages:
+                if parser.has_option("languages", name):
+                    languages[name] = parser.getboolean("languages", name)
+    return {name: parse_hotkey(spec) for name, spec in values.items()}, languages
 
 
 def parse_hotkey(spec):
@@ -75,6 +92,8 @@ class Dictionary:
     def __init__(self):
         self.english = load_tsv("english_shortcuts.tsv")
         self.pinyin = load_tsv("pinyin_shortcuts.tsv")
+        self.japanese = load_tsv("japanese_shortcuts.tsv")
+        self.korean = load_tsv("korean_shortcuts.tsv")
         self.words = [line.strip() for line in (ASSETS / "english_words.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
         self.lexicon = {}
         for line in (ASSETS / "pinyin_lexicon.tsv").read_text(encoding="utf-8").splitlines():
@@ -100,6 +119,16 @@ class Dictionary:
                     break
         return result[:32] or [value]
 
+    def extra_candidates(self, value, japanese):
+        source = self.japanese if japanese else self.korean
+        result = list(source.get(value, []))
+        for key, values in source.items():
+            if key.startswith(value):
+                result.extend(item for item in values if item not in result)
+            if len(result) >= 32:
+                break
+        return result[:32] or [value]
+
 
 class MinKeyboardEngine(IBus.Engine):
     def __init__(self):
@@ -111,9 +140,12 @@ class MinKeyboardEngine(IBus.Engine):
         self.lookup = IBus.LookupTable.new(9, 0, True, True)
 
     def _refresh(self):
-        self.candidates = (self.dictionary.english_candidates(self.composing)
-                           if self.mode == "english" else
-                           self.dictionary.chinese_candidates(self.composing, self.mode == "traditional"))
+        if self.mode == "english":
+            self.candidates = self.dictionary.english_candidates(self.composing)
+        elif self.mode in ("simplified", "traditional"):
+            self.candidates = self.dictionary.chinese_candidates(self.composing, self.mode == "traditional")
+        else:
+            self.candidates = self.dictionary.extra_candidates(self.composing, self.mode == "japanese")
         self.lookup.clear()
         for candidate in self.candidates:
             self.lookup.append_candidate(IBus.Text.new_from_string(candidate))
@@ -131,23 +163,26 @@ class MinKeyboardEngine(IBus.Engine):
             self._commit(self.candidates[index])
 
     def do_process_key_event(self, keyval, keycode, state):
-        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("english", (0, 0))):
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("english", (0, 0))) and ACTIVE_LANGUAGES.get("english", True):
             self.mode = "english"
             self.composing = ""
             self._refresh()
             return True
-        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("simplified", (0, 0))):
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("simplified", (0, 0))) and ACTIVE_LANGUAGES.get("simplified", True):
             self.mode = "simplified"
             self.composing = ""
             self._refresh()
             return True
-        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("traditional", (0, 0))):
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("traditional", (0, 0))) and ACTIVE_LANGUAGES.get("traditional", True):
             self.mode = "traditional"
             self.composing = ""
             self._refresh()
             return True
         if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("mode", (0, 0))):
-            self.mode = {"english": "simplified", "simplified": "traditional", "traditional": "english"}[self.mode]
+            order = [name for name in ("english", "simplified", "traditional", "japanese", "korean") if ACTIVE_LANGUAGES.get(name, True)]
+            if not order:
+                order = ["english"]
+            self.mode = order[(order.index(self.mode) + 1) % len(order)] if self.mode in order else order[0]
             self.composing = ""
             self._refresh()
             return True
@@ -181,8 +216,8 @@ def main():
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--hotkey", help="Override the mode-cycle hotkey, e.g. Control+F12")
     args = parser.parse_args()
-    global ACTIVE_HOTKEYS
-    ACTIVE_HOTKEYS = load_preferences(args.config, args.hotkey)
+    global ACTIVE_HOTKEYS, ACTIVE_LANGUAGES
+    ACTIVE_HOTKEYS, ACTIVE_LANGUAGES = load_preferences(args.config, args.hotkey)
     IBus.init()
     bus = IBus.Bus()
     factory = IBus.Factory.new(bus.get_connection())

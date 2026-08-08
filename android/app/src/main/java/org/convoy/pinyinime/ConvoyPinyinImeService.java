@@ -37,6 +37,8 @@ public class ConvoyPinyinImeService extends InputMethodService {
     private enum InputMode {
         SIMPLIFIED,
         TRADITIONAL,
+        JAPANESE,
+        KOREAN,
         ENGLISH
     }
 
@@ -75,6 +77,7 @@ public class ConvoyPinyinImeService extends InputMethodService {
 
     private PinyinEngine pinyinEngine;
     private EnglishEngine englishEngine;
+    private ExtraLanguageEngine extraLanguageEngine;
     private final Handler repeatHandler = new Handler(Looper.getMainLooper());
     private final StringBuilder composing = new StringBuilder();
     private final List<String> currentCandidates = new ArrayList<>();
@@ -84,7 +87,6 @@ public class ConvoyPinyinImeService extends InputMethodService {
     private boolean symbolsPageTwo = false;
     private boolean suggestionsExpanded = false;
 
-    private TextView composingText;
     private LinearLayout candidateContainer;
     private HorizontalScrollView candidateScroll;
     private Button candidatePrev;
@@ -117,7 +119,9 @@ public class ConvoyPinyinImeService extends InputMethodService {
         if (englishEngine == null) {
             englishEngine = new EnglishEngine(this);
         }
-        composingText = root.findViewById(R.id.composing_text);
+        if (extraLanguageEngine == null) {
+            extraLanguageEngine = new ExtraLanguageEngine(getAssets());
+        }
         candidateContainer = root.findViewById(R.id.candidate_container);
         candidateScroll = root.findViewById(R.id.candidate_scroll);
         candidatePrev = root.findViewById(R.id.candidate_prev);
@@ -172,6 +176,9 @@ public class ConvoyPinyinImeService extends InputMethodService {
     public void onStartInput(EditorInfo attribute, boolean restarting) {
         super.onStartInput(attribute, restarting);
         stopRepeat();
+        if (!isLanguageEnabled(inputMode)) {
+            inputMode = firstEnabledMode();
+        }
         composing.setLength(0);
         shiftOn = false;
         refreshComposingUi();
@@ -263,17 +270,16 @@ public class ConvoyPinyinImeService extends InputMethodService {
             if (inputMode == InputMode.ENGLISH) {
                 return getString(R.string.key_space);
             }
-            return inputMode == InputMode.TRADITIONAL
-                    ? getString(R.string.key_space_tw)
-                    : getString(R.string.key_space_cn);
+            return getString(R.string.key_space_cn);
         }
         if (KEY_ENTER.equals(key)) {
             if (inputMode == InputMode.ENGLISH) {
                 return getString(R.string.key_enter);
             }
-            return inputMode == InputMode.TRADITIONAL
-                    ? getString(R.string.key_enter_tw)
-                    : getString(R.string.key_enter_cn);
+            if (inputMode == InputMode.TRADITIONAL) return getString(R.string.key_enter_tw);
+            if (inputMode == InputMode.JAPANESE) return getString(R.string.key_enter_ja);
+            if (inputMode == InputMode.KOREAN) return getString(R.string.key_enter_ko);
+            return getString(R.string.key_enter_cn);
         }
         if (KEY_BACKSPACE.equals(key)) {
             return getString(R.string.key_backspace);
@@ -336,6 +342,9 @@ public class ConvoyPinyinImeService extends InputMethodService {
     }
 
     private void setInputMode(InputMode nextMode) {
+        if (!isLanguageEnabled(nextMode)) {
+            return;
+        }
         inputMode = nextMode;
         rebuildKeyboard();
         refreshComposingUi();
@@ -343,17 +352,36 @@ public class ConvoyPinyinImeService extends InputMethodService {
     }
 
     private void cycleInputMode() {
-        switch (inputMode) {
+        InputMode[] modes = InputMode.values();
+        int start = inputMode.ordinal();
+        for (int offset = 1; offset <= modes.length; offset++) {
+            InputMode next = modes[(start + offset) % modes.length];
+            if (isLanguageEnabled(next)) {
+                setInputMode(next);
+                return;
+            }
+        }
+    }
+
+    private boolean isLanguageEnabled(InputMode mode) {
+        return ImePreferences.isLanguageEnabled(this, languageKey(mode));
+    }
+
+    private InputMode firstEnabledMode() {
+        for (InputMode mode : InputMode.values()) {
+            if (isLanguageEnabled(mode)) return mode;
+        }
+        return InputMode.ENGLISH;
+    }
+
+    private String languageKey(InputMode mode) {
+        switch (mode) {
+            case SIMPLIFIED: return "simplified";
+            case TRADITIONAL: return "traditional";
+            case JAPANESE: return "japanese";
+            case KOREAN: return "korean";
             case ENGLISH:
-                setInputMode(InputMode.SIMPLIFIED);
-                break;
-            case SIMPLIFIED:
-                setInputMode(InputMode.TRADITIONAL);
-                break;
-            case TRADITIONAL:
-            default:
-                setInputMode(InputMode.ENGLISH);
-                break;
+            default: return "english";
         }
     }
 
@@ -408,6 +436,8 @@ public class ConvoyPinyinImeService extends InputMethodService {
         if (inputMode == InputMode.ENGLISH) {
             applyAutoCorrectIfNeeded(ic);
             clearComposingState();
+        } else {
+            commitComposingForCurrentMode(ic);
         }
         ic.commitText(" ", 1);
     }
@@ -425,7 +455,13 @@ public class ConvoyPinyinImeService extends InputMethodService {
         if (composing.length() == 0) {
             return;
         }
-        commitComposingAsRaw(ic);
+        List<String> candidates = getCandidates();
+        if (!candidates.isEmpty() && !candidates.get(0).equals(composing.toString())) {
+            ic.commitText(candidates.get(0), 1);
+            clearComposingState();
+        } else {
+            commitComposingAsRaw(ic);
+        }
     }
 
     private List<String> getCandidates() {
@@ -434,6 +470,9 @@ public class ConvoyPinyinImeService extends InputMethodService {
         }
         if (inputMode == InputMode.ENGLISH) {
             return englishEngine.getCandidates(composing.toString());
+        }
+        if (inputMode == InputMode.JAPANESE || inputMode == InputMode.KOREAN) {
+            return extraLanguageEngine.getCandidates(composing.toString(), inputMode == InputMode.JAPANESE);
         }
         PinyinEngine.ScriptMode scriptMode = inputMode == InputMode.TRADITIONAL
                 ? PinyinEngine.ScriptMode.TRADITIONAL
@@ -492,18 +531,7 @@ public class ConvoyPinyinImeService extends InputMethodService {
     }
 
     private void refreshComposingUi() {
-        if (composingText == null) {
-            return;
-        }
-        if (composing.length() == 0) {
-            composingText.setText(inputMode == InputMode.ENGLISH
-                    ? getString(R.string.composing_hint_en)
-                    : getString(R.string.composing_hint));
-            composingText.setAlpha(0.65f);
-        } else {
-            composingText.setText(formatForEnglish(composing.toString()));
-            composingText.setAlpha(1f);
-        }
+        // The composing line was intentionally removed; candidates now occupy the top strip.
     }
 
     private void refreshCandidates() {
@@ -728,7 +756,7 @@ public class ConvoyPinyinImeService extends InputMethodService {
     }
 
     private void applyThemeColors() {
-        if (rootView == null || composingText == null || candidatePrev == null || candidateNext == null || candidateExpand == null || modeSwitch == null) {
+        if (rootView == null || candidatePrev == null || candidateNext == null || candidateExpand == null || modeSwitch == null) {
             return;
         }
         boolean darkMode = ImePreferences.isDarkMode(this);
@@ -737,8 +765,6 @@ public class ConvoyPinyinImeService extends InputMethodService {
         int text = darkMode ? DARK_TEXT : LIGHT_TEXT;
 
         rootView.setBackgroundColor(bg);
-        composingText.setBackgroundColor(panel);
-        composingText.setTextColor(text);
         styleButton(candidatePrev);
         styleButton(candidateNext);
         styleButton(candidateExpand);
@@ -807,6 +833,10 @@ public class ConvoyPinyinImeService extends InputMethodService {
                 return getString(R.string.mode_en);
             case TRADITIONAL:
                 return getString(R.string.mode_tw);
+            case JAPANESE:
+                return getString(R.string.mode_ja);
+            case KOREAN:
+                return getString(R.string.mode_ko);
             case SIMPLIFIED:
             default:
                 return getString(R.string.mode_cn);
