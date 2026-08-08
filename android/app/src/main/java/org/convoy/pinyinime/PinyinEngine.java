@@ -101,6 +101,7 @@ public class PinyinEngine {
 
     private static void loadFromAssets(AssetManager assets) {
         LEXICON.clear();
+        addFallbackShortcuts();
         loadShortcuts(assets);
         try (InputStream stream = assets.open(LEXICON_ASSET);
              BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
@@ -121,6 +122,14 @@ public class PinyinEngine {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load pinyin lexicon asset", e);
         }
+    }
+
+    private static void addFallbackShortcuts() {
+        SHORTCUTS.clear();
+        SHORTCUTS.put("bzd", new Entry(Collections.singletonList("不知道"), Collections.singletonList("不知道")));
+        SHORTCUTS.put("wsm", new Entry(Collections.singletonList("为什么"), Collections.singletonList("為什麼")));
+        SHORTCUTS.put("yyds", new Entry(Collections.singletonList("永远的神"), Collections.singletonList("永遠的神")));
+        SHORTCUTS.put("xswl", new Entry(Collections.singletonList("笑死我了"), Collections.singletonList("笑死我了")));
     }
 
     private static void loadShortcuts(AssetManager assets) {

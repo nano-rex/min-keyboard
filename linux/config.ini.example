@@ -1,0 +1,6 @@
+[hotkeys]
+# Use X11/IBus key names. Restart the engine after changing this file.
+mode = Control+F12
+english = Control+1
+simplified = Control+2
+traditional = Control+3

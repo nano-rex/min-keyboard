@@ -250,6 +250,12 @@ public class ConvoyPinyinImeService extends InputMethodService {
     }
 
     private String labelFor(String key) {
+        if (",".equals(key) && inputMode != InputMode.ENGLISH) {
+            return getString(R.string.key_comma_cn);
+        }
+        if (".".equals(key) && inputMode != InputMode.ENGLISH) {
+            return getString(R.string.key_period_cn);
+        }
         if (KEY_SHIFT.equals(key)) {
             return getString(R.string.key_shift);
         }

@@ -149,6 +149,12 @@ public class EnglishEngine {
         alias(aliases, "lets", "let's", "lets");
         alias(aliases, "thered", "there'd");
         alias(aliases, "therell", "there'll");
+        // Keep the core shortcuts available even if an OEM build omits optional assets.
+        alias(aliases, "wdym", "what do you mean");
+        alias(aliases, "idk", "I don't know");
+        alias(aliases, "btw", "by the way");
+        alias(aliases, "omw", "on my way");
+        alias(aliases, "asap", "as soon as possible");
         return aliases;
     }
 

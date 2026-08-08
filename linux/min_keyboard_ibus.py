@@ -6,6 +6,8 @@ two editions share shortcuts and candidate vocabulary.
 """
 
 from pathlib import Path
+import argparse
+import configparser
 import sys
 
 import gi
@@ -16,6 +18,48 @@ from gi.repository import GLib, IBus
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "android" / "app" / "src" / "main" / "assets"
+DEFAULT_CONFIG = Path.home() / ".config" / "min-keyboard" / "config.ini"
+ACTIVE_HOTKEYS = {}
+
+
+def load_preferences(path, mode_override=None):
+    values = {
+        "mode": "Control+F12",
+        "english": "Control+1",
+        "simplified": "Control+2",
+        "traditional": "Control+3",
+    }
+    parser = configparser.ConfigParser()
+    if path.exists():
+        parser.read(path, encoding="utf-8")
+        values.update(dict(parser.items("hotkeys")) if parser.has_section("hotkeys") else {})
+    if mode_override:
+        values["mode"] = mode_override
+    return {name: parse_hotkey(spec) for name, spec in values.items()}
+
+
+def parse_hotkey(spec):
+    modifiers = IBus.ModifierType(0)
+    parts = [part.strip() for part in spec.split("+") if part.strip()]
+    if not parts:
+        return 0, modifiers
+    for part in parts[:-1]:
+        name = part.lower()
+        if name in ("ctrl", "control"):
+            modifiers |= IBus.ModifierType.CONTROL_MASK
+        elif name in ("alt", "mod1"):
+            modifiers |= IBus.ModifierType.MOD1_MASK
+        elif name == "shift":
+            modifiers |= IBus.ModifierType.SHIFT_MASK
+    key = parts[-1]
+    keyval = ord(key.lower()) if len(key) == 1 else getattr(IBus, "KEY_" + key.upper(), 0)
+    return keyval, modifiers
+
+
+def hotkey_pressed(keyval, state, hotkey):
+    expected_key, expected_modifiers = hotkey
+    relevant = IBus.ModifierType.CONTROL_MASK | IBus.ModifierType.MOD1_MASK | IBus.ModifierType.SHIFT_MASK
+    return keyval == expected_key and (state & relevant) == expected_modifiers
 
 
 def load_tsv(name):
@@ -87,7 +131,22 @@ class MinKeyboardEngine(IBus.Engine):
             self._commit(self.candidates[index])
 
     def do_process_key_event(self, keyval, keycode, state):
-        if state & IBus.ModifierType.CONTROL_MASK and keyval == IBus.KEY_F12:
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("english", (0, 0))):
+            self.mode = "english"
+            self.composing = ""
+            self._refresh()
+            return True
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("simplified", (0, 0))):
+            self.mode = "simplified"
+            self.composing = ""
+            self._refresh()
+            return True
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("traditional", (0, 0))):
+            self.mode = "traditional"
+            self.composing = ""
+            self._refresh()
+            return True
+        if hotkey_pressed(keyval, state, ACTIVE_HOTKEYS.get("mode", (0, 0))):
             self.mode = {"english": "simplified", "simplified": "traditional", "traditional": "english"}[self.mode]
             self.composing = ""
             self._refresh()
@@ -118,6 +177,12 @@ class MinKeyboardEngine(IBus.Engine):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Min Keyboard offline IBus engine")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--hotkey", help="Override the mode-cycle hotkey, e.g. Control+F12")
+    args = parser.parse_args()
+    global ACTIVE_HOTKEYS
+    ACTIVE_HOTKEYS = load_preferences(args.config, args.hotkey)
     IBus.init()
     bus = IBus.Bus()
     factory = IBus.Factory.new(bus.get_connection())
