@@ -22,8 +22,11 @@ Minimal offline Android keyboard with an AOSP-inspired interface and English, Si
 
 ## Build
 ```bash
-./gradlew :app:assembleDebug
+./android/gradlew -p android :app:assembleDebug
 ```
+
+The Linux IBus engine is in `linux/`. See `linux/README.md` for dependencies
+and installation instructions.
 
 ## Install and enable
 1. Install the APK.

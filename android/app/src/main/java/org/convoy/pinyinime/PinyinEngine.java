@@ -22,6 +22,7 @@ public class PinyinEngine {
     }
 
     private static final String LEXICON_ASSET = "pinyin_lexicon.tsv";
+    private static final String SHORTCUTS_ASSET = "pinyin_shortcuts.tsv";
     private static final int MAX_CANDIDATES = 64;
 
     private static final class Entry {
@@ -35,6 +36,7 @@ public class PinyinEngine {
     }
 
     private static final NavigableMap<String, Entry> LEXICON = new TreeMap<>();
+    private static final NavigableMap<String, Entry> SHORTCUTS = new TreeMap<>();
     private static volatile boolean loaded;
 
     public PinyinEngine(Context context) {
@@ -52,6 +54,10 @@ public class PinyinEngine {
         }
 
         LinkedHashSet<String> results = new LinkedHashSet<>();
+        Entry shortcut = SHORTCUTS.get(input);
+        if (shortcut != null) {
+            addAll(results, shortcut, scriptMode);
+        }
         Entry exact = LEXICON.get(input);
         if (exact != null) {
             addAll(results, exact, scriptMode);
@@ -95,6 +101,7 @@ public class PinyinEngine {
 
     private static void loadFromAssets(AssetManager assets) {
         LEXICON.clear();
+        loadShortcuts(assets);
         try (InputStream stream = assets.open(LEXICON_ASSET);
              BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line;
@@ -113,6 +120,25 @@ public class PinyinEngine {
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load pinyin lexicon asset", e);
+        }
+    }
+
+    private static void loadShortcuts(AssetManager assets) {
+        try (InputStream stream = assets.open(SHORTCUTS_ASSET);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split("\\t", -1);
+                if (parts.length < 3) {
+                    continue;
+                }
+                String key = normalize(parts[0]);
+                if (!key.isEmpty()) {
+                    SHORTCUTS.put(key, new Entry(splitCandidates(parts[1]), splitCandidates(parts[2])));
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load pinyin shortcut asset", e);
         }
     }
 

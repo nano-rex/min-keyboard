@@ -2,5 +2,8 @@
 local.properties
 /build/
 /app/build/
+/android/app/build/
+/android/.gradle/
+android/local.properties
 *.iml
 data/

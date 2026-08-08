@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component>
+  <name>org.nanorex.MinKeyboard</name>
+  <description>Min Keyboard offline English and Chinese input</description>
+  <exec>/usr/bin/python3 /usr/lib/min-keyboard/min_keyboard_ibus.py --ibus</exec>
+  <version>0.1</version>
+  <author>nano-rex</author>
+  <license>GPL-3.0-or-later</license>
+  <engines>
+    <engine>
+      <name>min-keyboard</name>
+      <longname>Min Keyboard</longname>
+      <description>Offline English, Simplified Chinese, and Traditional Chinese input</description>
+      <language>zh</language>
+      <license>GPL-3.0-or-later</license>
+      <rank>90</rank>
+    </engine>
+  </engines>
+</component>

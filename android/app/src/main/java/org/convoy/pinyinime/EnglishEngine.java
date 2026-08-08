@@ -17,6 +17,7 @@ import java.util.Map;
 
 public class EnglishEngine {
     private static final String WORDS_ASSET = "english_words.txt";
+    private static final String SHORTCUTS_ASSET = "english_shortcuts.tsv";
     private static final int MAX_CANDIDATES = 32;
 
     private static final List<String> WORDS = new ArrayList<>();
@@ -166,6 +167,7 @@ public class EnglishEngine {
                 return;
             }
             WORDS.clear();
+            loadShortcuts(assets);
             try (InputStream stream = assets.open(WORDS_ASSET);
                  BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
                 String line;
@@ -179,6 +181,22 @@ public class EnglishEngine {
                 throw new IllegalStateException("Failed to load english word asset", e);
             }
             loaded = true;
+        }
+    }
+
+    private static void loadShortcuts(AssetManager assets) {
+        try (InputStream stream = assets.open(SHORTCUTS_ASSET);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split("\\t", -1);
+                if (parts.length < 2 || parts[0].trim().isEmpty() || parts[1].trim().isEmpty()) {
+                    continue;
+                }
+                alias(ALIASES, parts[0].trim(), parts[1].trim());
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load English shortcut asset", e);
         }
     }
 
