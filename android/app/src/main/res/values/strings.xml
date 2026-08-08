@@ -30,7 +30,9 @@
     <string name="key_enter_cn">换行</string>
     <string name="key_space_tw">空格</string>
     <string name="key_enter_tw">換行</string>
+    <string name="key_space_ja">スペース</string>
     <string name="key_enter_ja">改行</string>
+    <string name="key_space_ko">스페이스</string>
     <string name="key_enter_ko">줄바꿈</string>
     <string name="key_comma_cn">，</string>
     <string name="key_period_cn">。</string>

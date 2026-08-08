@@ -54,11 +54,6 @@ public class ConvoyPinyinImeService extends InputMethodService {
     private static final String[] ROW2 = {"a", "s", "d", "f", "g", "h", "j", "k", "l"};
     private static final String[] ROW3 = {KEY_SHIFT, "z", "x", "c", "v", "b", "n", "m", KEY_BACKSPACE};
     private static final String[] ROW4 = {KEY_SYMBOLS, ",", KEY_SPACE, ".", KEY_ENTER};
-    private static final String LETTER_KEYS = "qwertyuiopasdfghjklzxcvbnm";
-    private static final String JAPANESE_LABELS = "たていすかんなにらせちとしはきくまのりつさそひこみも";
-    private static final String[] JAPANESE_VALUES = {"ta", "te", "i", "su", "ka", "n", "na", "ni", "ra", "se", "chi", "to", "shi", "ha", "ki", "ku", "ma", "no", "ri", "tsu", "sa", "so", "hi", "ko", "mi", "mo"};
-    private static final String KOREAN_LABELS = "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔㅁㄴㅇㄹㅎㅗㅓㅏㅣㅋㅌㅊㅍㅠㅜㅡ";
-    private static final String[] KOREAN_VALUES = {"b", "j", "d", "g", "s", "yo", "yeo", "ya", "ae", "e", "m", "n", "ng", "r", "h", "o", "eo", "a", "i", "k", "t", "ch", "p", "yu", "u", "eu"};
 
     private static final String[] EN_SYMBOL_ROW1 = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
     private static final String[] EN_SYMBOL_ROW2 = {"-", "/", ":", ";", "(", ")", "$", "&", "@", "'"};
@@ -275,6 +270,8 @@ public class ConvoyPinyinImeService extends InputMethodService {
             if (inputMode == InputMode.ENGLISH) {
                 return getString(R.string.key_space);
             }
+            if (inputMode == InputMode.JAPANESE) return getString(R.string.key_space_ja);
+            if (inputMode == InputMode.KOREAN) return getString(R.string.key_space_ko);
             return getString(R.string.key_space_cn);
         }
         if (KEY_ENTER.equals(key)) {
@@ -299,19 +296,8 @@ public class ConvoyPinyinImeService extends InputMethodService {
             return KEY_MORE_SYMBOLS;
         }
         if (key.length() == 1 && Character.isLetter(key.charAt(0))) {
-            int letterIndex = LETTER_KEYS.indexOf(key);
-            if (inputMode == InputMode.JAPANESE) return String.valueOf(JAPANESE_LABELS.charAt(letterIndex));
-            if (inputMode == InputMode.KOREAN) return String.valueOf(KOREAN_LABELS.charAt(letterIndex));
             return shiftOn ? key.toUpperCase() : key;
         }
-        return key;
-    }
-
-    private String inputValueForKey(String key) {
-        int letterIndex = LETTER_KEYS.indexOf(key);
-        if (letterIndex < 0) return key;
-        if (inputMode == InputMode.JAPANESE) return JAPANESE_VALUES[letterIndex];
-        if (inputMode == InputMode.KOREAN) return KOREAN_VALUES[letterIndex];
         return key;
     }
 
@@ -403,20 +389,12 @@ public class ConvoyPinyinImeService extends InputMethodService {
 
     private void handleTextKey(InputConnection ic, String key) {
         String value = labelFor(key);
+        char ch = value.charAt(0);
         if (symbolsMode) {
             commitComposingForCurrentMode(ic);
             ic.commitText(value, 1);
             return;
         }
-
-        if (inputMode == InputMode.JAPANESE || inputMode == InputMode.KOREAN) {
-            composing.append(inputValueForKey(key));
-            refreshComposingUi();
-            refreshCandidates();
-            return;
-        }
-
-        char ch = value.charAt(0);
 
         if (inputMode == InputMode.ENGLISH) {
             if (pinyinEngine.isComposingChar(ch)) {

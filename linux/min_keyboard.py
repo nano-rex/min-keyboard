@@ -16,11 +16,6 @@ ASSETS = ROOT / "android" / "app" / "src" / "main" / "assets"
 CONFIG_PATH = Path.home() / ".config" / "min-keyboard" / "config.ini"
 LANGUAGES = ("english", "simplified", "traditional", "japanese", "korean")
 LABELS = {"english": "English", "simplified": "简", "traditional": "繁", "japanese": "日", "korean": "한"}
-LETTER_KEYS = "qwertyuiopasdfghjklzxcvbnm"
-JAPANESE_LABELS = "たていすかんなにらせちとしはきくまのりつさそひこみも"
-JAPANESE_VALUES = ("ta", "te", "i", "su", "ka", "n", "na", "ni", "ra", "se", "chi", "to", "shi", "ha", "ki", "ku", "ma", "no", "ri", "tsu", "sa", "so", "hi", "ko", "mi", "mo")
-KOREAN_LABELS = "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔㅁㄴㅇㄹㅎㅗㅓㅏㅣㅋㅌㅊㅍㅠㅜㅡ"
-KOREAN_VALUES = ("b", "j", "d", "g", "s", "yo", "yeo", "ya", "ae", "e", "m", "n", "ng", "r", "h", "o", "eo", "a", "i", "k", "t", "ch", "p", "yu", "u", "eu")
 
 
 def load_config():
@@ -158,23 +153,14 @@ class MinKeyboard(tk.Tk):
         for row in rows:
             frame = tk.Frame(self.keyboard); frame.pack(fill="x")
             for key in row:
-                value = self.key_value(key)
-                tk.Button(frame, text=self.key_label(key), command=lambda item=value: self.add_text(item), height=2).pack(side="left", fill="x", expand=True, padx=1, pady=1)
+                tk.Button(frame, text=key, command=lambda item=key: self.add_text(item), height=2).pack(side="left", fill="x", expand=True, padx=1, pady=1)
         bottom = tk.Frame(self.keyboard); bottom.pack(fill="x")
-        for label, action in (("⌫", self.backspace), ("Space", self.space), ("Enter", self.enter)):
+        space_labels = {"simplified": "空格", "traditional": "空格", "japanese": "スペース", "korean": "스페이스"}
+        enter_labels = {"simplified": "换行", "traditional": "換行", "japanese": "改行", "korean": "줄바꿈"}
+        space_label = space_labels.get(self.mode, "Space")
+        enter_label = enter_labels.get(self.mode, "Enter")
+        for label, action in (("⌫", self.backspace), (space_label, self.space), (enter_label, self.enter)):
             tk.Button(bottom, text=label, command=action, height=2).pack(side="left", fill="x", expand=True, padx=1, pady=1)
-
-    def key_label(self, key):
-        index = LETTER_KEYS.find(key)
-        if index >= 0 and self.mode == "japanese": return JAPANESE_LABELS[index]
-        if index >= 0 and self.mode == "korean": return KOREAN_LABELS[index]
-        return key
-
-    def key_value(self, key):
-        index = LETTER_KEYS.find(key)
-        if index >= 0 and self.mode == "japanese": return JAPANESE_VALUES[index]
-        if index >= 0 and self.mode == "korean": return KOREAN_VALUES[index]
-        return key
 
     def add_text(self, value):
         self.composing += value.lower()
