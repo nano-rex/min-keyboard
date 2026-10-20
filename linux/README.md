@@ -11,12 +11,15 @@ reuses the generated dictionary assets from
 
 ## Features
 
-- English recommendations and expansions, such as `wdym` → “what do you
-  mean”.
-- Simplified Chinese pinyin and abbreviations such as `bzd` → `不知道`.
-- Traditional Chinese candidates.
-- Japanese romaji shortcuts, such as `arigatou` → `ありがとう`.
-- Korean romanization shortcuts, such as `annyeong` → `안녕`.
+- English recommendations ranked by frequency, close spellings for typos
+  (`teh` → “the”), and expansions such as `wdym` → “what do you mean”.
+- Malay recommendations, such as `bagai` → “bagaimana”.
+- Simplified and Traditional Chinese pinyin with the most common characters
+  first, whole sentences (`woaini` → `我爱你`) and abbreviations such as
+  `bzd` → `不知道`.
+- Japanese romaji to kana and kanji, such as `nihon` → `日本`.
+- Korean romanization to Hangul words, such as `gamsahamnida` → `감사합니다`.
+- Optional AI grammar check for English, Mandarin and Malay (see below).
 - On-screen QWERTY keyboard and text editor.
 - Configurable language enable/disable settings.
 - Configurable language hotkeys.
@@ -74,9 +77,11 @@ simplified = Control+2
 traditional = Control+3
 japanese = Control+4
 korean = Control+5
+malay = Control+6
 
 [languages]
 english = true
+malay = true
 simplified = true
 traditional = true
 japanese = true
@@ -97,7 +102,33 @@ Default language hotkeys:
 | `Control+3` | Traditional Chinese |
 | `Control+4` | Japanese |
 | `Control+5` | Korean |
+| `Control+6` | Malay |
 | `Control+F12` | Cycle enabled languages |
+
+## Optional AI grammar check
+
+Install [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) and
+download a GGUF model, for example
+[Qwen3-1.7B-Q4_K_M.gguf](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF). Then
+add to `~/.config/min-keyboard/config.ini`:
+
+```ini
+[ai]
+model = ~/models/Qwen3-1.7B-Q4_K_M.gguf
+```
+
+A **✓ Check grammar** button appears. It proofreads the selection, or the
+current line, and shows the suggestion for you to review before replacing. As on
+Android, the model may use at most a quarter of your RAM and half of what is
+free, runs on half of the CPU cores, and is unloaded after a minute without
+checks. Prompts and models are shared with the Android app; see
+[`docs/ai-grammar-check.md`](../docs/ai-grammar-check.md).
+
+## Tests
+
+```bash
+python3 -m unittest discover -s linux
+```
 
 ## Limitations
 

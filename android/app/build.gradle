@@ -10,8 +10,28 @@ android {
         applicationId 'org.convoy.pinyinime'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '0.1.0-alpha'
+        versionCode 2
+        versionName '0.2.0-alpha'
+
+        ndk {
+            // armeabi-v7a is built only so 32-bit phones can install the keyboard;
+            // DeviceProfiler keeps the AI check off there (too slow and too little memory).
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared', '-DCMAKE_BUILD_TYPE=Release'
+            }
+        }
+    }
+
+    ndkVersion '27.2.12479018'
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
     }
 
     buildTypes {
@@ -24,6 +44,12 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.all {
+            maxHeapSize = '1g'
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -31,4 +57,5 @@ android {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
 }

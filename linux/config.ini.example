@@ -6,10 +6,17 @@ simplified = Control+2
 traditional = Control+3
 japanese = Control+4
 korean = Control+5
+malay = Control+6
 
 [languages]
 english = true
+malay = true
 simplified = true
 traditional = true
 japanese = true
 korean = true
+
+[ai]
+# Optional grammar check for English, Mandarin and Malay. Needs: pip install llama-cpp-python
+# Download a model such as Qwen3-1.7B-Q4_K_M.gguf and point to it here.
+# model = ~/models/Qwen3-1.7B-Q4_K_M.gguf
