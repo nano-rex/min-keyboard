@@ -1,0 +1,6 @@
+# One Rust version for local builds and CI, so a newer Clippy cannot fail the lint step by
+# itself. Raise it deliberately, together with any code changes new lints ask for.
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]
+targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]

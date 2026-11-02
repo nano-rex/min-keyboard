@@ -14,8 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rust Android targets
-        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - name: Rust toolchain
+        # Installs the version, components and Android targets pinned in rust-toolchain.toml.
+        run: rustup show active-toolchain || rustup toolchain install
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
