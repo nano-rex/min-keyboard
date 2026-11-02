@@ -7,15 +7,17 @@ pub mod keyboard;
 mod platform;
 mod prefs;
 mod setup;
+mod setup_ai;
 pub mod theme;
 
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::{jboolean, jint, jobject, Env, Global, JResult, Local, RawEnv, RawVm, Value, Vm, JNI_VERSION_1_6};
-use keyboard::{Canvas, Editor, Engines, Host, Keyboard, Rect, TextStyle, Touch};
+use keyboard::{Canvas, Editor, Engines, Host, Keyboard, Proofreader, Rect, TextStyle, Touch};
 
 pub use platform::log_error;
 
@@ -39,6 +41,107 @@ fn set_shared_view(env: Env, view: Option<jobject>) {
         env.delete_global(old.0);
     }
     *shared = view.map(|v| Global(env.new_global(v)));
+}
+
+/// The AI grammar check's background thread, shared by the keyboard and the settings screen so
+/// they use one loaded model.
+fn grammar_worker() -> Option<&'static grammar::Worker> {
+    static WORKER: OnceLock<Option<grammar::Worker>> = OnceLock::new();
+    WORKER.get_or_init(|| grammar::Worker::start().map_err(|e| log_error(&format!("cannot start the AI check thread: {e}"))).ok()).as_ref()
+}
+
+/// A `java.io.File` method returning a path, such as `getFilesDir`, as a Rust path.
+fn context_dir(env: Env, context: jobject, method: &str) -> Option<PathBuf> {
+    let dir = Local::new(env, env.call(context, method, "()Ljava/io/File;", &[]).ok()?.obj());
+    let path = Local::new(env, env.call(dir.obj, "getPath", "()Ljava/lang/String;", &[]).ok()?.obj());
+    Some(PathBuf::from(env.read_string(path.obj)))
+}
+
+/// Where the AI model is installed (the same place as in version 0.2, so it carries over).
+pub fn model_path(env: Env, context: jobject) -> Option<PathBuf> {
+    Some(context_dir(env, context, "getFilesDir")?.join("models").join("grammar.gguf"))
+}
+
+/// Where the processed fixed part of the AI prompt is kept; Android may clear it at any time.
+pub fn prompt_cache_dir(env: Env, context: jobject) -> Option<PathBuf> {
+    let dir = context_dir(env, context, "getCacheDir")?.join("grammar");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// Battery saver and overheating, which limit or block the AI check: (power save, too hot).
+pub fn power_state(env: Env, context: jobject) -> (bool, bool) {
+    let read = || {
+        let name = Local::new(env, env.string("power").ok()?);
+        let power = Local::new(
+            env,
+            env.call(context, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[Value::Obj(name.obj)]).ok()?.obj(),
+        );
+        let saving = env.call(power.obj, "isPowerSaveMode", "()Z", &[]).map(Value::bool).unwrap_or(false);
+        // THERMAL_STATUS_SEVERE and above; the call exists from Android 10.
+        const THERMAL_STATUS_SEVERE: i32 = 3;
+        let hot = env.call(power.obj, "getCurrentThermalStatus", "()I", &[]).map(Value::int).unwrap_or(0) >= THERMAL_STATUS_SEVERE;
+        Some((saving, hot))
+    };
+    read().unwrap_or((false, false))
+}
+
+/// Starts a check on the shared worker, after the checks that need the Android context.
+pub fn start_check(env: Env, context: jobject, text: &str, language: grammar::Language, on_update: Box<dyn Fn(grammar::Update) + Send>) {
+    if cfg!(not(target_pointer_width = "64")) {
+        return on_update(grammar::Update::Error("The AI check needs a 64-bit CPU.".into()));
+    }
+    let (power_save, too_hot) = power_state(env, context);
+    if too_hot {
+        return on_update(grammar::Update::Error("The device is too hot. Try again when it has cooled down.".into()));
+    }
+    let (Some(worker), Some(model)) = (grammar_worker(), model_path(env, context)) else {
+        return on_update(grammar::Update::Error("The AI check could not start.".into()));
+    };
+    worker.check(grammar::Request {
+        model,
+        cache_dir: prompt_cache_dir(env, context),
+        text: text.to_string(),
+        language,
+        threads: if power_save { 1 } else { grammar::default_threads() },
+        on_update,
+    });
+}
+
+/// The keyboard's [`Proofreader`]: checks run on the shared worker and redraw the keyboard.
+struct AndroidProofreader {
+    context: Global,
+}
+
+impl Proofreader for AndroidProofreader {
+    fn check(&mut self, text: &str, language: grammar::Language, on_update: Box<dyn Fn(grammar::Update) + Send>) {
+        let Some(env) = VM.get().and_then(Vm::env) else { return };
+        let on_update = Box::new(move |update| {
+            on_update(update);
+            redraw_from_any_thread();
+        });
+        start_check(env, self.context.0, text, language, on_update);
+    }
+
+    fn cancel(&mut self) {
+        if let Some(worker) = grammar_worker() {
+            worker.cancel();
+        }
+    }
+
+    fn release(&mut self) {
+        if let Some(worker) = grammar_worker() {
+            worker.release();
+        }
+    }
+}
+
+impl Drop for AndroidProofreader {
+    fn drop(&mut self) {
+        if let Some(env) = VM.get().and_then(Vm::env) {
+            env.delete_global(self.context.0);
+        }
+    }
 }
 
 /// Runs a native method body, turning a panic into a log line instead of undefined behaviour.
@@ -88,7 +191,8 @@ extern "system" fn service_on_create(raw: RawEnv, this: jobject) {
         let Some(assets) = platform::ApkAssets::new(env, assets.obj()) else { return log_error("no asset manager") };
         let engines = Engines::new(Arc::new(assets), Box::new(redraw_from_any_thread));
         let (density, scaled, _) = display_metrics(env, this).unwrap_or((1.0, 1.0, 0));
-        let keyboard = Keyboard::new(engines, prefs::load(env, this), density, scaled);
+        let mut keyboard = Keyboard::new(engines, prefs::load(env, this), density, scaled);
+        keyboard.set_proofreader(Some(Box::new(AndroidProofreader { context: Global(env.new_global(this)) })));
         let service = Service { service: Global(env.new_global(this)), keyboard, view: None, timer: None, paint: None };
         SERVICE.with(|cell| *cell.borrow_mut() = Some(service));
     })
@@ -150,10 +254,32 @@ extern "system" fn service_on_start_input(raw: RawEnv, this: jobject, info: jobj
             "(Landroid/view/inputmethod/EditorInfo;Z)V",
             &[Value::Obj(info), Value::Bool(restarting != 0)],
         );
+        let field = |name: &str| env.field(info, name, "I").map(Value::int).unwrap_or(-1);
+        let has_selection = !info.is_null() && field("initialSelStart") != field("initialSelEnd");
         with_service(|service| {
             let mut host = AndroidHost::new(env, service);
-            service.keyboard.on_start_input(&mut host);
+            service.keyboard.on_start_input(&mut host, has_selection);
         });
+    })
+}
+
+extern "system" fn service_on_trim_memory(raw: RawEnv, this: jobject, level: jint) {
+    guard((), || {
+        let env = unsafe { Env::from_raw(raw) };
+        let _ = env.call_super(this, SERVICE_SUPER, "onTrimMemory", "(I)V", &[Value::Int(level)]);
+        // Give the AI model's memory back as soon as the system asks for it.
+        const TRIM_MEMORY_RUNNING_MODERATE: i32 = 5;
+        if level >= TRIM_MEMORY_RUNNING_MODERATE {
+            with_service(|service| service.keyboard.release_proofreader());
+        }
+    })
+}
+
+extern "system" fn service_on_low_memory(raw: RawEnv, this: jobject) {
+    guard((), || {
+        let env = unsafe { Env::from_raw(raw) };
+        let _ = env.call_super(this, SERVICE_SUPER, "onLowMemory", "()V", &[]);
+        with_service(|service| service.keyboard.release_proofreader());
     })
 }
 
@@ -295,12 +421,15 @@ extern "system" fn view_on_touch_event(raw: RawEnv, _this: jobject, event: jobje
 extern "system" fn callback_run(raw: RawEnv, this: jobject) {
     guard((), || {
         let env = unsafe { Env::from_raw(raw) };
-        if env.field(this, "id", "J").map(|v| matches!(v, Value::Long(CALLBACK_TIMER))).unwrap_or(false) {
-            with_service(|service| {
-                let mut editor = AndroidEditor::new(env, service.service.0);
-                let mut host = AndroidHost::new(env, service);
-                service.keyboard.on_timer(&mut editor, &mut host);
-            });
+        match callback_id(env, this) {
+            CALLBACK_TIMER => {
+                with_service(|service| {
+                    let mut editor = AndroidEditor::new(env, service.service.0);
+                    let mut host = AndroidHost::new(env, service);
+                    service.keyboard.on_timer(&mut editor, &mut host);
+                });
+            }
+            id => setup::on_run(env, id),
         }
     })
 }
@@ -316,6 +445,13 @@ extern "system" fn callback_on_click(raw: RawEnv, this: jobject, view: jobject) 
     guard((), || {
         let env = unsafe { Env::from_raw(raw) };
         setup::on_click(env, callback_id(env, this), view);
+    })
+}
+
+extern "system" fn callback_on_dialog_click(raw: RawEnv, this: jobject, _dialog: jobject, which: jint) {
+    guard((), || {
+        let env = unsafe { Env::from_raw(raw) };
+        setup::on_dialog_click(env, callback_id(env, this), which);
     })
 }
 
@@ -614,9 +750,17 @@ pub extern "system" fn JNI_OnLoad(vm: RawVm, _reserved: *mut c_void) -> jint {
                 ("onStartInputView", "(Landroid/view/inputmethod/EditorInfo;Z)V", f(service_on_start_input_view as *const ())),
                 ("onFinishInputView", "(Z)V", f(service_on_finish_input_view as *const ())),
                 ("onUpdateSelection", "(IIIIII)V", f(service_on_update_selection as *const ())),
+                ("onTrimMemory", "(I)V", f(service_on_trim_memory as *const ())),
+                ("onLowMemory", "()V", f(service_on_low_memory as *const ())),
             ],
         ),
-        (SETUP_CLASS, vec![("onCreate", "(Landroid/os/Bundle;)V", f(setup::on_create as *const ()))]),
+        (
+            SETUP_CLASS,
+            vec![
+                ("onCreate", "(Landroid/os/Bundle;)V", f(setup::on_create as *const ())),
+                ("onActivityResult", "(IILandroid/content/Intent;)V", f(setup::on_activity_result as *const ())),
+            ],
+        ),
         (
             VIEW_CLASS,
             vec![
@@ -630,6 +774,7 @@ pub extern "system" fn JNI_OnLoad(vm: RawVm, _reserved: *mut c_void) -> jint {
             vec![
                 ("run", "()V", f(callback_run as *const ())),
                 ("onClick", "(Landroid/view/View;)V", f(callback_on_click as *const ())),
+                ("onClick", "(Landroid/content/DialogInterface;I)V", f(callback_on_dialog_click as *const ())),
                 ("onCheckedChanged", "(Landroid/widget/CompoundButton;Z)V", f(callback_on_switch as *const ())),
                 ("onCheckedChanged", "(Landroid/widget/RadioGroup;I)V", f(callback_on_radio as *const ())),
             ],

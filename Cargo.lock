@@ -15,8 +15,13 @@ name = "min-keyboard-android"
 version = "0.3.0"
 dependencies = [
  "min-keyboard-engines",
+ "min-keyboard-grammar",
 ]
 
 [[package]]
 name = "min-keyboard-engines"
+version = "0.3.0"
+
+[[package]]
+name = "min-keyboard-grammar"
 version = "0.3.0"

@@ -533,6 +533,8 @@ pub fn min_keyboard_classes() -> Vec<Class> {
             native("onStartInputView", "V", &["Landroid/view/inputmethod/EditorInfo;", "Z"]),
             native("onFinishInputView", "V", &["Z"]),
             native("onUpdateSelection", "V", &["I", "I", "I", "I", "I", "I"]),
+            native("onTrimMemory", "V", &["I"]),
+            native("onLowMemory", "V", &[]),
         ],
     };
     let setup = Class {
@@ -541,7 +543,12 @@ pub fn min_keyboard_classes() -> Vec<Class> {
         interfaces: vec![],
         access: ACC_PUBLIC,
         fields: vec![],
-        methods: vec![clinit.clone(), forwarding_init("Landroid/app/Activity;", &[]), native("onCreate", "V", &["Landroid/os/Bundle;"])],
+        methods: vec![
+            clinit.clone(),
+            forwarding_init("Landroid/app/Activity;", &[]),
+            native("onCreate", "V", &["Landroid/os/Bundle;"]),
+            native("onActivityResult", "V", &["I", "I", "Landroid/content/Intent;"]),
+        ],
     };
     let keyboard_view = Class {
         name: class("KeyboardView"),
@@ -566,6 +573,7 @@ pub fn min_keyboard_classes() -> Vec<Class> {
             s("Landroid/view/View$OnClickListener;"),
             s("Landroid/widget/CompoundButton$OnCheckedChangeListener;"),
             s("Landroid/widget/RadioGroup$OnCheckedChangeListener;"),
+            s("Landroid/content/DialogInterface$OnClickListener;"),
         ],
         access: ACC_PUBLIC | ACC_FINAL,
         fields: vec![Field { name: s("id"), ty: s("J"), access: ACC_PUBLIC | ACC_FINAL }],
@@ -591,6 +599,7 @@ pub fn min_keyboard_classes() -> Vec<Class> {
             },
             native("run", "V", &[]),
             native("onClick", "V", &["Landroid/view/View;"]),
+            native("onClick", "V", &["Landroid/content/DialogInterface;", "I"]),
             native("onCheckedChanged", "V", &["Landroid/widget/CompoundButton;", "Z"]),
             native("onCheckedChanged", "V", &["Landroid/widget/RadioGroup;", "I"]),
         ],

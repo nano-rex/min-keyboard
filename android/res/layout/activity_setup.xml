@@ -64,6 +64,50 @@
         <Switch android:id="@+id/language_japanese_toggle" style="@style/SettingSwitch" android:text="@string/language_japanese" />
         <Switch android:id="@+id/language_korean_toggle" style="@style/SettingSwitch" android:text="@string/language_korean" />
 
+        <!-- AI grammar check -->
+        <TextView style="@style/SectionTitle" android:text="@string/section_ai" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:alpha="0.75" android:text="@string/ai_intro" android:textSize="14sp" />
+        <Switch android:id="@+id/grammar_button_toggle" style="@style/SettingSwitch" android:text="@string/ai_show_button" />
+
+        <TextView
+            android:id="@+id/device_report"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/card"
+            android:fontFamily="monospace"
+            android:padding="14dp"
+            android:text="@string/ai_device_hint"
+            android:textSize="13sp" />
+
+        <Button android:id="@+id/ai_device_check" style="@style/Widget.MinKeyboard.SettingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ai_device_check" />
+        <Button android:id="@+id/ai_download" style="@style/Widget.MinKeyboard.SettingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ai_download" />
+        <Button android:id="@+id/ai_import" style="@style/Widget.MinKeyboard.SettingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ai_import" />
+
+        <ProgressBar
+            android:id="@+id/ai_progress"
+            style="@android:style/Widget.DeviceDefault.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:max="100"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/ai_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="15sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <Button android:id="@+id/ai_test" style="@style/Widget.MinKeyboard.SettingsButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/ai_test" />
+            <Button android:id="@+id/ai_remove" style="@style/Widget.MinKeyboard.SettingsButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="@string/ai_remove" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

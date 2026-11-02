@@ -76,6 +76,8 @@ const GET_STATIC_INT_FIELD: usize = 150;
 const NEW_STRING: usize = 163;
 const GET_STRING_LENGTH: usize = 164;
 const REGISTER_NATIVES: usize = 215;
+const NEW_BYTE_ARRAY: usize = 176;
+const GET_BYTE_ARRAY_REGION: usize = 200;
 const GET_STRING_REGION: usize = 220;
 const EXCEPTION_CHECK: usize = 228;
 
@@ -401,6 +403,25 @@ impl Env {
         let text = self.read_string(s);
         self.delete_local(s);
         Some(text)
+    }
+
+    pub fn new_byte_array(&self, len: usize) -> JResult<jobject> {
+        let array = unsafe { jni_fn!(self, NEW_BYTE_ARRAY, fn(jint) -> jobject)(self.raw, len as jint) };
+        self.checked(array).and_then(|a| if a.is_null() { Err(JavaException) } else { Ok(a) })
+    }
+
+    /// Copies the start of a `byte[]` into `out`.
+    pub fn read_byte_array(&self, array: jobject, out: &mut [u8]) -> JResult<()> {
+        unsafe {
+            jni_fn!(self, GET_BYTE_ARRAY_REGION, fn(jobject, jint, jint, *mut u8) -> ())(
+                self.raw,
+                array,
+                0,
+                out.len() as jint,
+                out.as_mut_ptr(),
+            )
+        };
+        self.checked(())
     }
 
     pub fn register_natives(&self, class: jclass, methods: &[(&str, &str, *mut c_void)]) -> JResult<()> {

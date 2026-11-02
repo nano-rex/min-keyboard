@@ -23,8 +23,10 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
   name on the space bar.
 - Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
-- The Linux edition has an optional on-device AI grammar check; see
-  [docs/ai-grammar-check.md](docs/ai-grammar-check.md).
+- **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some
+  text and tap **✓ Check grammar** above the keys; the keyboard shows the changes and replaces
+  the selection only if you tap **Replace**. It never runs while you type. The model runs on the
+  device, in Rust. See [docs/ai-grammar-check.md](docs/ai-grammar-check.md).
 
 ## Android
 
@@ -35,7 +37,7 @@ From the NDK, only the sysroot libraries are used; its compilers are not.
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 export ANDROID_HOME=~/Android/Sdk          # and ANDROID_NDK_HOME if the NDK is not in $ANDROID_HOME/ndk
 cargo run -p apkbuild                      # writes target/apk/min-keyboard.apk
-cargo test --workspace                     # engines, keyboard logic, dictionary tool, APK tooling
+cargo test --workspace                     # engines, keyboard logic, grammar model, dictionary tool, APK tooling
 ```
 
 `cargo run -p apkbuild -- --help` lists the options, such as `--abi arm64-v8a` for a faster
@@ -70,7 +72,7 @@ The rest of the build:
    signs it with APK Signature Scheme v2.
 
 Settings are stored in the same `SharedPreferences` file as the earlier Java app, so they carry
-over on upgrade.
+over on upgrade, and an AI model installed by version 0.2.0 is used as it is.
 
 ## Linux
 
@@ -88,6 +90,7 @@ See [linux/README.md](linux/README.md) for hotkeys, configuration and the option
 
 ```text
 engines/          input engines (Latin, Pinyin, Japanese, Korean) and their tests
+grammar/          the AI grammar check: GGUF reader, tokenizer and Qwen model on the CPU
 android/          the Android app: Rust sources (src/), manifest and resources (res/)
 tools/apkbuild/   builds and signs the APK, including the generated classes.dex
 tools/dicttool/   builds the dictionaries in assets/
@@ -103,9 +106,7 @@ and rebuild commands are in [docs/dictionary-sources.md](docs/dictionary-sources
 
 ## Not included
 
-Cloud sync, online prediction, handwriting, voice input and gesture typing. Version 0.3.0, the Rust
-rewrite, drops the Android AI grammar check that 0.2.0 had through llama.cpp; the Linux edition
-still has it.
+Cloud sync, online prediction, handwriting, voice input and gesture typing.
 
 ## License
 

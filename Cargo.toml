@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["engines", "android", "tools/apkbuild", "tools/dicttool"]
+members = ["engines", "grammar", "android", "tools/apkbuild", "tools/dicttool"]
 
 [workspace.package]
 version = "0.3.0"

@@ -13,6 +13,9 @@ pub struct Theme {
     pub accent_text: u32,
     pub candidate_highlight: u32,
     pub popup: u32,
+    /// Text the AI check adds or removes.
+    pub added: u32,
+    pub removed: u32,
 }
 
 const fn rgb(hex: u32) -> u32 {
@@ -32,6 +35,8 @@ pub const DARK: Theme = Theme {
     accent_text: rgb(0x0B1D3A),
     candidate_highlight: rgb(0x2F3A4D),
     popup: rgb(0x4A4D53),
+    added: rgb(0x81C995),
+    removed: rgb(0xF28B82),
 };
 
 pub const LIGHT: Theme = Theme {
@@ -47,6 +52,8 @@ pub const LIGHT: Theme = Theme {
     accent_text: rgb(0xFFFFFF),
     candidate_highlight: rgb(0xD3E3FD),
     popup: rgb(0xFFFFFF),
+    added: rgb(0x137333),
+    removed: rgb(0xC5221F),
 };
 
 pub fn of(dark: bool) -> &'static Theme {

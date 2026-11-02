@@ -13,8 +13,17 @@ pub const THEME_LIGHT: &str = "light";
 pub const THEME_DARK: &str = "dark";
 
 /// The on/off settings shown as switches: (preference key, default).
-pub const SWITCHES: [(&str, bool); 5] =
-    [("key_vibration", true), ("key_popup", true), ("number_row_hints", true), ("auto_correct", true), ("auto_space", false)];
+pub const SWITCHES: [(&str, bool); 6] = [
+    ("key_vibration", true),
+    ("key_popup", true),
+    ("number_row_hints", true),
+    ("auto_correct", true),
+    ("auto_space", false),
+    // Off until the user turns it on; it also needs a model installed.
+    ("grammar_button", false),
+];
+/// The display name of the installed AI model.
+pub const KEY_MODEL_NAME: &str = "grammar_model_name";
 
 fn prefs(env: Env, context: jobject) -> Option<Local> {
     let name = Local::new(env, env.string(PREFS_NAME).ok()?);
@@ -48,7 +57,7 @@ fn contains(env: Env, context: jobject, key: &str) -> bool {
     read().unwrap_or(false)
 }
 
-fn get_string(env: Env, context: jobject, key: &str) -> Option<String> {
+pub fn get_string(env: Env, context: jobject, key: &str) -> Option<String> {
     let prefs = prefs(env, context)?;
     let key = Local::new(env, env.string(key).ok()?);
     let value = env
@@ -146,6 +155,7 @@ pub fn load(env: Env, context: jobject) -> Settings {
         number_hints: bool_of(SWITCHES[2].0, SWITCHES[2].1),
         auto_correct: bool_of(SWITCHES[3].0, SWITCHES[3].1),
         auto_space: bool_of(SWITCHES[4].0, SWITCHES[4].1),
+        grammar_button: bool_of(SWITCHES[5].0, SWITCHES[5].1),
         languages,
     }
 }

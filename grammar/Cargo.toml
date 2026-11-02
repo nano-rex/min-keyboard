@@ -1,0 +1,9 @@
+[package]
+name = "min-keyboard-grammar"
+description = "On-device AI grammar check for Min Keyboard: a small Qwen GGUF model runner in plain Rust"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "grammar"

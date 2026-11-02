@@ -11,3 +11,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 min-keyboard-engines = { path = "../engines" }
+min-keyboard-grammar = { path = "../grammar" }

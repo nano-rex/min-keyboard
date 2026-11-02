@@ -2,9 +2,10 @@
 //! only through the [`Editor`], [`Host`] and [`Canvas`] traits, so it runs in desktop tests too.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use engines::{japanese, korean, Assets, JapaneseEngine, KoreanEngine, LatinEngine, PinyinEngine, ScriptMode};
+use grammar::{Change, Language, Update};
 
 use crate::theme::{self, Theme};
 
@@ -33,6 +34,15 @@ pub trait Host {
     fn schedule_timer(&mut self, delay_ms: i64);
     fn cancel_timer(&mut self);
     fn invalidate(&mut self);
+}
+
+/// The on-device AI grammar check, which runs in the background (see `grammar::Worker`).
+pub trait Proofreader {
+    /// Starts checking `text`; `on_update` may be called on another thread.
+    fn check(&mut self, text: &str, language: Language, on_update: Box<dyn Fn(Update) + Send>);
+    fn cancel(&mut self);
+    /// Frees the model's memory, for example when the system runs low.
+    fn release(&mut self);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,6 +171,8 @@ pub struct Settings {
     pub vibration: bool,
     pub key_popup: bool,
     pub number_hints: bool,
+    /// Show the AI check button while text is selected.
+    pub grammar_button: bool,
     /// Enabled flags, indexed like [`MODES`].
     pub languages: [bool; 6],
 }
@@ -174,6 +186,7 @@ impl Default for Settings {
             vibration: true,
             key_popup: true,
             number_hints: true,
+            grammar_button: false,
             languages: [true; 6],
         }
     }
@@ -349,6 +362,8 @@ const CN_SYMBOLS_2: [&[&str]; 4] = [
     &[KEY_LETTERS, "｜", KEY_SPACE, KEY_ENTER],
 ];
 
+const GRAMMAR_BUTTON: &str = "✓ Check grammar";
+
 const REPEAT_INITIAL_DELAY_MS: i64 = 350;
 const REPEAT_INTERVAL_MS: i64 = 60;
 const LONG_PRESS_MS: i64 = 350;
@@ -414,6 +429,10 @@ enum Target {
     PanelItem(usize),
     PanelDrag,
     Slider,
+    GrammarButton,
+    GrammarClose,
+    GrammarReplace,
+    GrammarDrag,
     Nothing,
 }
 
@@ -434,6 +453,64 @@ enum Timer {
     None,
     Repeat(i32),
     LongPress(i32),
+}
+
+// ------------------------------------------------------------ grammar check ----
+
+/// The AI check's panel, shown in place of the keys.
+struct GrammarPanel {
+    /// Numbers the checks so updates from a cancelled one are ignored.
+    request: u64,
+    original: String,
+    title: String,
+    /// The text shown: the selection, the answer so far, or the changes.
+    body: Vec<(Change, String)>,
+    /// The corrected text, once it differs from the selection.
+    result: Option<String>,
+    /// The check has answered or failed.
+    finished: bool,
+    scroll: f32,
+    /// Wrapped lines of `body` for a width, rebuilt when either changes.
+    lines: Option<(f32, Vec<Vec<Run>>)>,
+}
+
+/// A piece of one wrapped line of the panel's text.
+struct Run {
+    x: f32,
+    width: f32,
+    text: String,
+    change: Change,
+}
+
+impl GrammarPanel {
+    fn set_body(&mut self, body: Vec<(Change, String)>) {
+        self.body = body;
+        self.lines = None;
+    }
+
+    fn apply(&mut self, update: Update) {
+        match update {
+            Update::Status(status) if self.result.is_none() => self.title = status,
+            Update::Status(_) => {}
+            Update::Partial(text) => self.set_body(vec![(Change::Same, text)]),
+            Update::Done(corrected) => {
+                self.finished = true;
+                if grammar::changed(&self.original, &corrected) {
+                    self.title = "Suggested corrections — review before replacing".into();
+                    self.set_body(grammar::diff(&self.original, &corrected));
+                    self.result = Some(corrected);
+                } else {
+                    self.title = "No mistakes found ✓".into();
+                    self.set_body(vec![(Change::Same, self.original.clone())]);
+                }
+            }
+            Update::Error(message) => {
+                self.finished = true;
+                self.title = "AI check unavailable".into();
+                self.set_body(vec![(Change::Same, message)]);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- keyboard ----
@@ -463,6 +540,14 @@ pub struct Keyboard {
     strip_scroll: f32,
     strip_content: f32,
     panel_scroll: f32,
+
+    /// Whether the editor has text selected, which offers the AI check.
+    selection: bool,
+    proofreader: Option<Box<dyn Proofreader>>,
+    grammar: Option<GrammarPanel>,
+    grammar_requests: u64,
+    /// Updates from the check, delivered here from the background and applied when drawing.
+    grammar_updates: Arc<Mutex<Vec<(u64, Update)>>>,
 }
 
 impl Keyboard {
@@ -491,9 +576,28 @@ impl Keyboard {
             strip_scroll: 0.0,
             strip_content: 0.0,
             panel_scroll: 0.0,
+            selection: false,
+            proofreader: None,
+            grammar: None,
+            grammar_requests: 0,
+            grammar_updates: Arc::new(Mutex::new(Vec::new())),
         };
         keyboard.rebuild();
         keyboard
+    }
+
+    pub fn set_proofreader(&mut self, proofreader: Option<Box<dyn Proofreader>>) {
+        self.proofreader = proofreader;
+    }
+
+    /// Frees the AI model's memory (on low memory); an open check panel shows why it stopped.
+    pub fn release_proofreader(&mut self) {
+        if let Some(proofreader) = &mut self.proofreader {
+            proofreader.release();
+        }
+        if let Some(panel) = self.grammar.as_mut().filter(|p| !p.finished) {
+            panel.apply(Update::Error("Stopped because the device is low on memory.".into()));
+        }
     }
 
     fn dp(&self, value: f32) -> f32 {
@@ -522,8 +626,10 @@ impl Keyboard {
         self.candidates_dirty = true;
     }
 
-    pub fn on_start_input(&mut self, host: &mut dyn Host) {
+    pub fn on_start_input(&mut self, host: &mut dyn Host, has_selection: bool) {
         self.stop_timer(host);
+        self.selection = has_selection;
+        self.close_grammar();
         if !self.settings.enabled(self.mode) {
             self.mode = self.first_enabled_mode();
             self.engines.preload(self.mode);
@@ -535,6 +641,7 @@ impl Keyboard {
     }
 
     pub fn on_finish_input_view(&mut self, host: &mut dyn Host) {
+        self.close_grammar();
         self.preview = None;
         self.presses.clear();
         self.stop_timer(host);
@@ -542,6 +649,11 @@ impl Keyboard {
     }
 
     pub fn on_update_selection(&mut self, editor: &mut dyn Editor, host: &mut dyn Host, sel_start: i32, sel_end: i32, candidates_end: i32) {
+        let selection = sel_start != sel_end;
+        if selection != self.selection {
+            self.selection = selection;
+            host.invalidate();
+        }
         // The user moved the cursor away from the word being typed: finish it where it is.
         if self.mode.is_latin() && !self.composing.is_empty() && (sel_start != candidates_end || sel_end != candidates_end) {
             self.composing.clear();
@@ -988,6 +1100,9 @@ impl Keyboard {
         if has_candidates && self.next_button().contains(x, y) {
             return Target::Next;
         }
+        if self.grammar_button_visible() && self.grammar_button(canvas).contains(x, y) {
+            return Target::GrammarButton;
+        }
         let strip = self.strip_rect(self.composing_label_width(canvas));
         if strip.contains(x, y) {
             let chips = self.chip_rects(canvas, strip);
@@ -996,6 +1111,17 @@ impl Keyboard {
                 .position(|r| r.offset(-self.strip_scroll, 0.0).contains(x, y))
                 .map(Target::Candidate)
                 .unwrap_or(Target::StripDrag);
+        }
+        if self.grammar.is_some() {
+            return if self.grammar_close_rect().contains(x, y) {
+                Target::GrammarClose
+            } else if self.grammar_replace_rect().contains(x, y) {
+                Target::GrammarReplace
+            } else if self.keys_area().contains(x, y) {
+                Target::GrammarDrag
+            } else {
+                Target::Nothing
+            };
         }
         if self.suggestions_expanded {
             if self.slider_rect().contains(x, y) {
@@ -1048,12 +1174,14 @@ impl Keyboard {
 
     pub fn on_touch(&mut self, touch: Touch, editor: &mut dyn Editor, host: &mut dyn Host, canvas: &mut dyn Canvas) {
         self.refresh_candidates();
+        self.apply_grammar_updates();
         let slop = self.dp(8.0);
         match touch {
             Touch::Down { id, x, y } => {
                 let target = self.hit_test(x, y, canvas);
                 let start_scroll = match target {
                     Target::Candidate(_) | Target::StripDrag => self.strip_scroll,
+                    Target::GrammarDrag => self.grammar.as_ref().map_or(0.0, |p| p.scroll),
                     _ => self.panel_scroll,
                 };
                 self.presses.retain(|p| p.id != id);
@@ -1099,6 +1227,13 @@ impl Keyboard {
                     }
                     Target::Slider => {
                         self.set_panel_scroll_from_slider(y);
+                        host.invalidate();
+                    }
+                    Target::GrammarDrag => {
+                        let max = self.grammar_max_scroll();
+                        if let Some(panel) = &mut self.grammar {
+                            panel.scroll = (press.start_scroll - (y - press.start_y)).clamp(0.0, max);
+                        }
                         host.invalidate();
                     }
                     _ => {}
@@ -1152,6 +1287,12 @@ impl Keyboard {
                     }
                 }
             }
+            Target::GrammarButton => {
+                self.haptic(host);
+                self.start_grammar(editor, host);
+            }
+            Target::GrammarClose => self.close_grammar(),
+            Target::GrammarReplace => self.replace_with_correction(editor),
             _ => {}
         }
     }
@@ -1197,6 +1338,228 @@ impl Keyboard {
         self.presses.iter().any(|p| p.target == Target::Key(index))
     }
 
+    // -------------------------------------------------------- grammar check ----
+
+    fn grammar_button_visible(&self) -> bool {
+        self.settings.grammar_button
+            && self.proofreader.is_some()
+            && self.selection
+            && self.grammar.is_none()
+            && self.composing.is_empty()
+            && self.candidates.is_empty()
+    }
+
+    fn grammar_button(&self, canvas: &mut dyn Canvas) -> Rect {
+        let strip = self.strip_rect(0.0);
+        let width = canvas.measure(GRAMMAR_BUTTON, self.sp(15.0), true) + self.dp(28.0);
+        let top = strip.center_y() - self.dp(18.0);
+        let left = strip.left + self.dp(2.0);
+        Rect::new(left, top, (left + width).min(strip.right), top + self.dp(36.0))
+    }
+
+    fn grammar_title_rect(&self) -> Rect {
+        let area = self.keys_area();
+        Rect::new(area.left + self.dp(12.0), area.top + self.dp(4.0), area.right - self.dp(12.0), area.top + self.dp(30.0))
+    }
+
+    fn grammar_body_rect(&self) -> Rect {
+        let area = self.keys_area();
+        Rect::new(area.left + self.dp(12.0), area.top + self.dp(32.0), area.right - self.dp(12.0), area.bottom - self.dp(58.0))
+    }
+
+    fn grammar_close_rect(&self) -> Rect {
+        let area = self.keys_area();
+        Rect::new(area.left + self.dp(8.0), area.bottom - self.dp(52.0), area.center_x() - self.dp(4.0), area.bottom - self.dp(8.0))
+    }
+
+    fn grammar_replace_rect(&self) -> Rect {
+        let area = self.keys_area();
+        Rect::new(area.center_x() + self.dp(4.0), area.bottom - self.dp(52.0), area.right - self.dp(8.0), area.bottom - self.dp(8.0))
+    }
+
+    fn grammar_line_height(&self) -> f32 {
+        self.sp(16.0) * 1.45
+    }
+
+    fn grammar_max_scroll(&self) -> f32 {
+        let lines = self.grammar.as_ref().and_then(|p| p.lines.as_ref()).map_or(0, |(_, lines)| lines.len());
+        (lines as f32 * self.grammar_line_height() - self.grammar_body_rect().height()).max(0.0)
+    }
+
+    /// Checks the selected text in the background and opens the panel that shows the result.
+    fn start_grammar(&mut self, editor: &mut dyn Editor, host: &mut dyn Host) {
+        let text = editor.selected_text().unwrap_or_default();
+        self.grammar_requests += 1;
+        let request = self.grammar_requests;
+        let mut language = grammar::detect_language(&text, self.mode == Mode::Malay);
+        let chinese_mode = matches!(self.mode, Mode::Simplified | Mode::Traditional);
+        if chinese_mode && text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+            language = Language::Mandarin;
+        }
+        let mut panel = GrammarPanel {
+            request,
+            original: text.clone(),
+            title: format!("AI check · {}", language.name()),
+            body: vec![(Change::Same, text.clone())],
+            result: None,
+            finished: false,
+            scroll: 0.0,
+            lines: None,
+        };
+        self.suggestions_expanded = false;
+        if text.trim().is_empty() {
+            panel.apply(Update::Error("This app does not let keyboards read the selected text.".into()));
+        } else if grammar::is_unsupported_script(&text) {
+            panel.apply(Update::Error("The AI check works with English, Mandarin and Malay.".into()));
+        } else if let Some(proofreader) = &mut self.proofreader {
+            let updates = Arc::clone(&self.grammar_updates);
+            proofreader.check(
+                &text,
+                language,
+                Box::new(move |update| updates.lock().unwrap_or_else(|e| e.into_inner()).push((request, update))),
+            );
+        }
+        self.grammar = Some(panel);
+        host.invalidate();
+    }
+
+    fn apply_grammar_updates(&mut self) {
+        let updates = std::mem::take(&mut *self.grammar_updates.lock().unwrap_or_else(|e| e.into_inner()));
+        let Some(panel) = &mut self.grammar else { return };
+        for (request, update) in updates {
+            if request == panel.request {
+                panel.apply(update);
+            }
+        }
+    }
+
+    /// Replaces the selection with the correction, if the selection is still what was checked.
+    fn replace_with_correction(&mut self, editor: &mut dyn Editor) {
+        let Some(panel) = &mut self.grammar else { return };
+        let Some(result) = panel.result.clone() else { return };
+        if editor.selected_text().as_deref() != Some(panel.original.as_str()) {
+            panel.title = "The selection changed. Select the text and check again.".into();
+            return;
+        }
+        editor.commit_text(&result);
+        self.close_grammar();
+    }
+
+    fn close_grammar(&mut self) {
+        if self.grammar.take().is_some() {
+            if let Some(proofreader) = &mut self.proofreader {
+                proofreader.cancel();
+            }
+        }
+    }
+
+    /// Wraps the panel's text into lines of runs that fit `width`.
+    fn wrap(&self, canvas: &mut dyn Canvas, body: &[(Change, String)], width: f32) -> Vec<Vec<Run>> {
+        let size = self.sp(16.0);
+        let mut lines: Vec<Vec<Run>> = vec![Vec::new()];
+        let mut x = 0.0;
+        for (change, text) in body {
+            let bold = *change == Change::Added;
+            for word in grammar::text::diff_tokens(text) {
+                if word == "\n" {
+                    lines.push(Vec::new());
+                    x = 0.0;
+                    continue;
+                }
+                let word_width = canvas.measure(word, size, bold);
+                // A word wider than the panel is broken between characters.
+                let pieces: Vec<(String, f32)> = if word_width > width {
+                    word.chars().map(|c| (c.to_string(), canvas.measure(&c.to_string(), size, bold))).collect()
+                } else {
+                    vec![(word.to_string(), word_width)]
+                };
+                for (piece, piece_width) in pieces {
+                    if x + piece_width > width && x > 0.0 {
+                        lines.push(Vec::new());
+                        x = 0.0;
+                        if piece.trim().is_empty() {
+                            continue; // no space at the start of a wrapped line
+                        }
+                    }
+                    let line = lines.last_mut().unwrap();
+                    match line.last_mut() {
+                        Some(run) if run.change == *change => {
+                            run.text.push_str(&piece);
+                            run.width += piece_width;
+                        }
+                        _ => line.push(Run { x, width: piece_width, text: piece, change: *change }),
+                    }
+                    x += piece_width;
+                }
+            }
+        }
+        lines
+    }
+
+    fn draw_grammar(&mut self, canvas: &mut dyn Canvas) {
+        let theme = self.theme;
+        let area = self.keys_area();
+        canvas.round_rect(Rect::new(area.left, area.top + self.dp(2.0), area.right, area.bottom), self.dp(10.0), theme.key);
+        let body = self.grammar_body_rect();
+        let stale = |panel: &GrammarPanel| panel.lines.as_ref().is_none_or(|(width, _)| (width - body.width()).abs() > 0.5);
+        if let Some(panel) = self.grammar.as_ref().filter(|p| stale(p)) {
+            let lines = self.wrap(canvas, &panel.body, body.width());
+            self.grammar.as_mut().unwrap().lines = Some((body.width(), lines));
+        }
+        let max_scroll = self.grammar_max_scroll();
+        if let Some(panel) = &mut self.grammar {
+            panel.scroll = panel.scroll.min(max_scroll);
+        }
+        let Some(panel) = &self.grammar else { return };
+
+        let title_rect = self.grammar_title_rect();
+        let size = self.sp(13.0);
+        let title = self.fit(canvas, &panel.title, size, false, title_rect.width(), false);
+        let (ascent, descent) = canvas.metrics(size, false);
+        let baseline = title_rect.center_y() - (ascent + descent) / 2.0;
+        canvas.text(&title, title_rect.left, baseline, TextStyle { size, color: theme.text_muted, bold: false, align: Align::Left });
+
+        let size = self.sp(16.0);
+        let line_height = self.grammar_line_height();
+        let (ascent, descent) = canvas.metrics(size, false);
+        canvas.clip(body);
+        for (i, line) in panel.lines.iter().flat_map(|(_, lines)| lines).enumerate() {
+            let top = body.top + i as f32 * line_height - panel.scroll;
+            if top + line_height < body.top || top > body.bottom {
+                continue;
+            }
+            let baseline = top + line_height / 2.0 - (ascent + descent) / 2.0;
+            for run in line {
+                let (color, bold) = match run.change {
+                    Change::Same => (theme.text, false),
+                    Change::Added => (theme.added, true),
+                    Change::Removed => (theme.removed, false),
+                };
+                canvas.text(&run.text, body.left + run.x, baseline, TextStyle { size, color, bold, align: Align::Left });
+                if run.change == Change::Removed {
+                    let y = baseline + (ascent + descent) / 2.0;
+                    let line = Rect::new(body.left + run.x, y - self.dp(0.75), body.left + run.x + run.width, y + self.dp(0.75));
+                    canvas.round_rect(line, 0.0, theme.removed);
+                }
+            }
+        }
+        canvas.unclip();
+
+        let pressed = |target: Target| self.presses.iter().any(|p| p.target == target);
+        let close = self.grammar_close_rect();
+        let close_fill = if pressed(Target::GrammarClose) { theme.function_key_pressed } else { theme.function_key };
+        self.key_background(canvas, close, close_fill);
+        self.centered_text(canvas, "Close", close, self.sp(15.0), theme.text, false);
+        let replace = self.grammar_replace_rect();
+        let (fill, color) = match (panel.result.is_some(), pressed(Target::GrammarReplace)) {
+            (true, false) => (theme.accent, theme.accent_text),
+            (true, true) => (theme.function_key_pressed, theme.text),
+            (false, _) => (theme.function_key, theme.text_muted),
+        };
+        self.key_background(canvas, replace, fill);
+        self.centered_text(canvas, "Replace", replace, self.sp(15.0), color, true);
+    }
+
     // ------------------------------------------------------------- drawing ----
 
     /// A rounded key with a thin darker edge at the bottom, like a physical key cap.
@@ -1235,6 +1598,7 @@ impl Keyboard {
 
     pub fn draw(&mut self, canvas: &mut dyn Canvas) {
         self.refresh_candidates();
+        self.apply_grammar_updates();
         let theme = self.theme;
         canvas.fill(theme.background);
         let bar_text = self.sp(15.0);
@@ -1277,8 +1641,15 @@ impl Keyboard {
             self.centered_text(canvas, &text, chip, self.sp(17.0), theme.text, first);
         }
         canvas.unclip();
+        if self.grammar_button_visible() {
+            let button = self.grammar_button(canvas);
+            canvas.round_rect(button, self.dp(18.0), theme.candidate_highlight);
+            self.centered_text(canvas, GRAMMAR_BUTTON, button, self.sp(15.0), theme.accent, true);
+        }
 
-        if self.suggestions_expanded {
+        if self.grammar.is_some() {
+            self.draw_grammar(canvas);
+        } else if self.suggestions_expanded {
             self.draw_panel(canvas);
         } else {
             self.draw_keys(canvas);
@@ -1369,6 +1740,7 @@ mod tests {
         composing: String,
         actions: Vec<i32>,
         info: Option<(i32, i32)>,
+        selected: Option<String>,
     }
 
     impl Editor for FakeEditor {
@@ -1377,6 +1749,13 @@ mod tests {
         }
         fn commit_text(&mut self, text: &str) {
             self.composing.clear();
+            // Committing replaces the selection, if any.
+            if let Some(selected) = self.selected.take() {
+                if let Some(at) = self.text.rfind(&selected) {
+                    self.text.replace_range(at..at + selected.len(), text);
+                    return;
+                }
+            }
             self.text.push_str(text);
         }
         fn set_composing_text(&mut self, text: &str) {
@@ -1392,7 +1771,7 @@ mod tests {
             }
         }
         fn selected_text(&mut self) -> Option<String> {
-            None
+            self.selected.clone()
         }
         fn editor_info(&mut self) -> Option<(i32, i32)> {
             self.info
@@ -1434,6 +1813,29 @@ mod tests {
         }
         fn clip(&mut self, _: Rect) {}
         fn unclip(&mut self) {}
+    }
+
+    /// Answers every check at once with `corrected`, and records what it was asked.
+    struct FakeProofreader {
+        corrected: String,
+        asked: Arc<Mutex<Vec<(String, Language)>>>,
+    }
+
+    impl Proofreader for FakeProofreader {
+        fn check(&mut self, text: &str, language: Language, on_update: Box<dyn Fn(Update) + Send>) {
+            self.asked.lock().unwrap().push((text.to_string(), language));
+            on_update(Update::Status("Checking…".into()));
+            on_update(Update::Done(self.corrected.clone()));
+        }
+        fn cancel(&mut self) {}
+        fn release(&mut self) {}
+    }
+
+    fn tap(kb: &mut Keyboard, rect: Rect, editor: &mut FakeEditor) {
+        let mut host = FakeHost::default();
+        let (x, y) = (rect.center_x(), rect.center_y());
+        kb.on_touch(Touch::Down { id: 0, x, y }, editor, &mut host, &mut FakeCanvas);
+        kb.on_touch(Touch::Up { id: 0, x, y }, editor, &mut host, &mut FakeCanvas);
     }
 
     fn keyboard() -> Keyboard {
@@ -1563,6 +1965,63 @@ mod tests {
         assert_eq!(kb.mode(), Mode::Japanese);
         kb.cycle_mode(&mut editor, &mut host);
         assert_eq!(kb.mode(), Mode::English);
+    }
+
+    #[test]
+    fn grammar_check_replaces_the_selection() {
+        let mut kb = keyboard();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        kb.set_proofreader(Some(Box::new(FakeProofreader { corrected: "He goes home.".into(), asked: Arc::clone(&asked) })));
+        let mut editor = FakeEditor { text: "Today he go home. Bye".into(), ..Default::default() };
+        let mut host = FakeHost::default();
+        editor.selected = Some("he go home.".into());
+        kb.on_update_selection(&mut editor, &mut host, 6, 17, -1);
+        assert!(!kb.grammar_button_visible(), "off by default");
+
+        kb.apply_settings(Settings { grammar_button: true, ..Default::default() });
+        kb.draw(&mut FakeCanvas);
+        assert!(kb.grammar_button_visible());
+        kb.on_update_selection(&mut editor, &mut host, 17, 17, -1);
+        assert!(!kb.grammar_button_visible(), "only while text is selected");
+        kb.on_update_selection(&mut editor, &mut host, 6, 17, -1);
+
+        let button = kb.grammar_button(&mut FakeCanvas);
+        tap(&mut kb, button, &mut editor);
+        assert_eq!(*asked.lock().unwrap(), vec![("he go home.".to_string(), Language::English)]);
+        kb.draw(&mut FakeCanvas);
+        let panel = kb.grammar.as_ref().expect("panel open");
+        assert_eq!(panel.result.as_deref(), Some("He goes home."));
+        assert!(panel.body.iter().any(|(change, text)| *change == Change::Added && text == "goes"));
+
+        let replace = kb.grammar_replace_rect();
+        tap(&mut kb, replace, &mut editor);
+        assert_eq!(editor.text, "Today He goes home. Bye");
+        assert!(kb.grammar.is_none(), "replacing closes the panel");
+    }
+
+    #[test]
+    fn grammar_check_refuses_a_changed_selection() {
+        let mut kb = keyboard();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        kb.set_proofreader(Some(Box::new(FakeProofreader { corrected: "我去图书馆了。".into(), asked: Arc::clone(&asked) })));
+        kb.apply_settings(Settings { grammar_button: true, ..Default::default() });
+        let mut editor =
+            FakeEditor { text: "我去了图书馆了。".into(), selected: Some("我去了图书馆了。".into()), ..Default::default() };
+        let mut host = FakeHost::default();
+        kb.on_update_selection(&mut editor, &mut host, 0, 8, -1);
+        kb.draw(&mut FakeCanvas);
+        let button = kb.grammar_button(&mut FakeCanvas);
+        tap(&mut kb, button, &mut editor);
+        assert_eq!(asked.lock().unwrap()[0].1, Language::Mandarin);
+        editor.selected = Some("图书馆".into());
+        kb.draw(&mut FakeCanvas);
+        let replace = kb.grammar_replace_rect();
+        tap(&mut kb, replace, &mut editor);
+        assert_eq!(editor.text, "我去了图书馆了。", "nothing replaced");
+        assert!(kb.grammar.as_ref().unwrap().title.contains("selection changed"));
+        let close = kb.grammar_close_rect();
+        tap(&mut kb, close, &mut editor);
+        assert!(kb.grammar.is_none());
     }
 
     #[test]

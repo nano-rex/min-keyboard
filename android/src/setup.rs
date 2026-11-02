@@ -1,11 +1,11 @@
 //! The settings screen. Its layout is `res/layout/activity_setup.xml`; this module binds the
 //! buttons and switches to the preferences the keyboard reads.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 use crate::jni::{jint, jobject, Env, Global, JResult, Local, RawEnv, Value};
 use crate::keyboard::MODES;
-use crate::{guard, log_error, prefs, CALLBACK_CLASS};
+use crate::{guard, log_error, prefs, setup_ai, CALLBACK_CLASS};
 
 const OPEN_INPUT_SETTINGS: i64 = 100;
 const OPEN_INPUT_PICKER: i64 = 101;
@@ -13,15 +13,19 @@ const THEME_GROUP: i64 = 102;
 /// Switches use `SWITCH_BASE + index` into [`switches`].
 const SWITCH_BASE: i64 = 200;
 
-thread_local! {
-    /// The settings activity currently shown, for `recreate()` after a theme change.
-    static ACTIVITY: RefCell<Option<Global>> = const { RefCell::new(None) };
+/// The settings activity currently shown, for `recreate()` after a theme change and for updates
+/// from the AI model's background work.
+pub static ACTIVITY: Mutex<Option<Global>> = Mutex::new(None);
+
+/// Runs `f` with the settings activity currently shown, if there is one.
+pub fn with_activity<R>(f: impl FnOnce(jobject) -> R) -> Option<R> {
+    ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|activity| f(activity.0))
 }
 
 /// Every switch on the screen: (view id, preference key, default).
 fn switches() -> Vec<(String, String, bool)> {
     let mut all: Vec<(String, String, bool)> =
-        ["vibration_toggle", "popup_toggle", "number_hints_toggle", "auto_correct_toggle", "auto_space_toggle"]
+        ["vibration_toggle", "popup_toggle", "number_hints_toggle", "auto_correct_toggle", "auto_space_toggle", "grammar_button_toggle"]
             .iter()
             .zip(prefs::SWITCHES)
             .map(|(id, (key, default))| (id.to_string(), key.to_string(), default))
@@ -41,7 +45,7 @@ fn resource_id(env: Env, context: jobject, name: &str, kind: &str) -> JResult<i3
     Ok(env.call(resources.obj, "getIdentifier", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I", &args)?.int())
 }
 
-fn find_view(env: Env, activity: jobject, name: &str) -> JResult<Local> {
+pub fn find_view(env: Env, activity: jobject, name: &str) -> JResult<Local> {
     let id = resource_id(env, activity, name, "id")?;
     let view = env.call(activity, "findViewById", "(I)Landroid/view/View;", &[Value::Int(id)])?.obj();
     if view.is_null() {
@@ -51,12 +55,13 @@ fn find_view(env: Env, activity: jobject, name: &str) -> JResult<Local> {
     Ok(Local::new(env, view))
 }
 
-fn callback(env: Env, id: i64) -> JResult<Local> {
+pub fn callback(env: Env, id: i64) -> JResult<Local> {
     Ok(Local::new(env, env.new_object(CALLBACK_CLASS, "(J)V", &[Value::Long(id)])?))
 }
 
 fn bind(env: Env, activity: jobject) -> JResult<()> {
-    for (name, id) in [("open_input_settings", OPEN_INPUT_SETTINGS), ("open_input_picker", OPEN_INPUT_PICKER)] {
+    let buttons = [("open_input_settings", OPEN_INPUT_SETTINGS), ("open_input_picker", OPEN_INPUT_PICKER)];
+    for (name, id) in buttons.into_iter().chain(setup_ai::BUTTONS) {
         let button = find_view(env, activity, name)?;
         let listener = callback(env, id)?;
         env.call(button.obj, "setOnClickListener", "(Landroid/view/View$OnClickListener;)V", &[Value::Obj(listener.obj)])?;
@@ -88,6 +93,8 @@ fn bind(env: Env, activity: jobject) -> JResult<()> {
             &[Value::Obj(listener.obj)],
         )?;
     }
+    setup_ai::on_open(env);
+    setup_ai::refresh(env, activity);
     Ok(())
 }
 
@@ -100,11 +107,9 @@ pub extern "system" fn on_create(raw: RawEnv, this: jobject, saved_state: jobjec
             let _ = env.call(this, "setTheme", "(I)V", &[Value::Int(theme)]);
         }
         let _ = env.call_super(this, "android/app/Activity", "onCreate", "(Landroid/os/Bundle;)V", &[Value::Obj(saved_state)]);
-        ACTIVITY.with(|cell| {
-            if let Some(old) = cell.borrow_mut().replace(Global(env.new_global(this))) {
-                env.delete_global(old.0);
-            }
-        });
+        if let Some(old) = ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()).replace(Global(env.new_global(this))) {
+            env.delete_global(old.0);
+        }
         let Ok(layout) = resource_id(env, this, "activity_setup", "layout") else { return };
         if env.call(this, "setContentView", "(I)V", &[Value::Int(layout)]).is_ok() && bind(env, this).is_err() {
             log_error("cannot set up the settings screen");
@@ -138,7 +143,7 @@ pub fn on_click(env: Env, id: i64, view: jobject) {
                 let _ = env.call(manager.obj, "showInputMethodPicker", "()V", &[]);
             }
         }
-        _ => {}
+        id => setup_ai::on_click(env, id, context.obj),
     }
 }
 
@@ -163,9 +168,25 @@ pub fn on_radio(env: Env, id: i64, group: jobject, checked_id: jint) {
         prefs::THEME_SYSTEM
     };
     prefs::set_string(env, context.obj, prefs::KEY_THEME, theme);
-    ACTIVITY.with(|cell| {
-        if let Some(activity) = &*cell.borrow() {
-            let _ = env.call(activity.0, "recreate", "()V", &[]);
-        }
+    with_activity(|activity| {
+        let _ = env.call(activity, "recreate", "()V", &[]);
     });
+}
+
+/// `NativeCallback.run()` with an id from this screen.
+pub fn on_run(env: Env, id: i64) {
+    setup_ai::on_run(env, id);
+}
+
+pub fn on_dialog_click(env: Env, id: i64, which: jint) {
+    setup_ai::on_dialog_click(env, id, which);
+}
+
+pub extern "system" fn on_activity_result(raw: RawEnv, this: jobject, request: jint, result: jint, data: jobject) {
+    guard((), || {
+        let env = unsafe { Env::from_raw(raw) };
+        let args = [Value::Int(request), Value::Int(result), Value::Obj(data)];
+        let _ = env.call_super(this, "android/app/Activity", "onActivityResult", "(IILandroid/content/Intent;)V", &args);
+        setup_ai::on_activity_result(env, this, request, result, data);
+    })
 }
