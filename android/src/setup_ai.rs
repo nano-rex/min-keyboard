@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use crate::jni::{jint, jobject, Env, Global, JResult, Local, Value};
 use crate::setup::{callback, find_view, with_activity};
-use crate::{grammar_worker, log_error, model_path, prefs, prompt_cache_dir, start_check, VM};
+use crate::{grammar_worker, log_error, model_path, prefs, prompt_cache_dir, start_check, start_prepare, VM};
 
 const DEVICE_CHECK: i64 = 103;
 const DOWNLOAD: i64 = 104;
@@ -297,23 +297,24 @@ pub fn on_activity_result(env: Env, activity: jobject, request: jint, result: ji
                 let outcome = import(env, context.0, uri.0, &target, storage);
                 if let Ok(name) = &outcome {
                     prefs::set_string(env, context.0, prefs::KEY_MODEL_NAME, name);
+                    if let Some(dir) = &cache_dir {
+                        clear_dir(dir);
+                    }
+                    prepare(env, context.0, name.clone());
                 }
                 env.delete_global(uri.0);
                 env.delete_global(context.0);
                 outcome
             })
         });
-        if let (Some(Ok(_)), Some(dir)) = (&outcome, &cache_dir) {
-            clear_dir(dir);
-        }
         let mut state = state();
         state.busy = false;
         state.progress = None;
-        state.status = match outcome {
-            Some(Ok(name)) => format!("Installed: {name}. Turn on the check button above, then select text and tap ✓ Check grammar."),
-            Some(Err(message)) => format!("Install failed: {message}"),
-            None => "Install failed.".into(),
-        };
+        match outcome {
+            Some(Ok(_)) => {} // `prepare` reports from here on
+            Some(Err(message)) => state.status = format!("Install failed: {message}"),
+            None => state.status = "Install failed.".into(),
+        }
         drop(state);
         post_refresh();
     });
@@ -448,6 +449,34 @@ fn check_model(path: &Path) -> Result<String, String> {
         None if model.name.is_empty() => "Your model (not a recommended one)".into(),
         None => format!("{} (not a recommended model)", model.name),
     })
+}
+
+/// Processes the fixed part of each language's prompt right after installing, while the user
+/// expects to wait, so the first check from the keyboard starts quickly.
+fn prepare(env: Env, context: jobject, name: String) {
+    {
+        let mut state = state();
+        state.testing = true;
+        state.status = "Preparing the model…".into();
+    }
+    let on_update = Box::new(move |update: grammar::Update| {
+        let mut state = state();
+        match update {
+            grammar::Update::Status(status) => state.status = status,
+            grammar::Update::Partial(_) => {}
+            grammar::Update::Done(_) => {
+                state.status = format!("Installed: {name}. Turn on the check button above, then select text and tap ✓ Check grammar.");
+                state.testing = false;
+            }
+            grammar::Update::Error(message) => {
+                state.status = format!("Installed: {name}, but preparing it failed: {message}");
+                state.testing = false;
+            }
+        }
+        drop(state);
+        post_refresh();
+    });
+    start_prepare(env, context, on_update);
 }
 
 /// Runs one real check so the user sees how fast the model is on this device.

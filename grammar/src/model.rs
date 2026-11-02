@@ -124,7 +124,8 @@ impl Cache {
         true
     }
 
-    fn truncate(&mut self, len: usize, kv_dim: usize) {
+    /// Forgets every token from `len` on, for example draft tokens the model rejected.
+    pub fn truncate(&mut self, len: usize, kv_dim: usize) {
         self.tokens.truncate(len);
         for buffer in self.keys.iter_mut().chain(&mut self.values) {
             buffer.truncate(len * kv_dim);
@@ -309,6 +310,18 @@ impl Model {
 
     /// Runs `tokens` through the model after the cached ones and returns the last token's logits.
     pub fn forward(&self, pool: &Pool, cache: &mut Cache, tokens: &[u32]) -> Vec<f32> {
+        let mut logits = self.forward_rows(pool, cache, tokens, false);
+        logits.pop().unwrap_or_default()
+    }
+
+    /// Runs `tokens` like [`forward`](Model::forward) and returns the most likely next token after
+    /// each of them, so several guessed tokens can be checked in one pass.
+    pub fn greedy(&self, pool: &Pool, cache: &mut Cache, tokens: &[u32]) -> Vec<u32> {
+        self.forward_rows(pool, cache, tokens, true).iter().map(|logits| argmax(logits)).collect()
+    }
+
+    /// The logits after the last token, or after every token when `all` is set.
+    fn forward_rows(&self, pool: &Pool, cache: &mut Cache, tokens: &[u32], all: bool) -> Vec<Vec<f32>> {
         let c = &self.config;
         let file = self.map.bytes();
         let (batch, dim, hd) = (tokens.len(), c.dim, c.head_dim);
@@ -413,11 +426,14 @@ impl Model {
         }
         cache.tokens.extend_from_slice(tokens);
 
-        let mut last = x[(batch - 1) * dim..].to_vec();
-        rms_norm(&mut last, &self.output_norm, c.eps);
-        let mut logits = vec![0.0f32; c.vocab];
-        self.matmul(pool, &[self.output], &[Q8::quantize(&last)], &last, &mut [&mut logits]);
-        logits
+        let mut rows = if all { x } else { x[(batch - 1) * dim..].to_vec() };
+        for row in rows.chunks_exact_mut(dim) {
+            rms_norm(row, &self.output_norm, c.eps);
+        }
+        let quantized = Self::quantize_rows(&rows, dim);
+        let mut logits = vec![0.0f32; quantized.len() * c.vocab];
+        self.matmul(pool, &[self.output], &quantized, &rows, &mut [&mut logits]);
+        logits.chunks_exact(c.vocab).map(<[f32]>::to_vec).collect()
     }
 
     /// Feeds a prompt, reusing whatever beginning of it is already in the cache, and returns the

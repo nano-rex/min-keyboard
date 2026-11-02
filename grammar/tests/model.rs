@@ -39,3 +39,19 @@ fn corrects_a_sentence() {
     let again = checker.check(text, grammar::Language::English, &mut |_| {}, &|| false).unwrap();
     assert_eq!(again, answer);
 }
+
+#[test]
+fn prepared_prompt_is_reused_after_reloading() {
+    let Some(path) = model_path() else { return eprintln!("GRAMMAR_TEST_MODEL not set; skipped") };
+    let dir = std::env::temp_dir().join(format!("min-keyboard-prepare-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let load = || grammar::Checker::load(&path, grammar::default_threads()).unwrap().with_cache_dir(Some(dir.clone()));
+    load().prepare(grammar::Language::Malay, &|| false).unwrap();
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "one prepared prompt file");
+    let text = "Saya ada tiga kucing-kucing.";
+    let answer = load().check(text, grammar::Language::Malay, &mut |_| {}, &|| false).unwrap();
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "the check used the prepared file");
+    let mut fresh = grammar::Checker::load(&path, grammar::default_threads()).unwrap();
+    assert_eq!(fresh.check(text, grammar::Language::Malay, &mut |_| {}, &|| false).unwrap(), answer);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

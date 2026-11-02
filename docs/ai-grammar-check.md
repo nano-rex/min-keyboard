@@ -12,7 +12,8 @@ The check is **off by default** and never runs while you type.
    model fits.
 2. Tap **Download …** to get the model file in your browser. Min Keyboard itself
    has no internet permission. Then tap **Install model file (.gguf)…** and pick
-   the downloaded file. It is checked and copied into the app.
+   the downloaded file. It is checked, copied into the app and prepared for each
+   language, so the first check starts quickly.
 3. Turn on **Show the check button when text is selected**.
 4. In any text field, select some text. **✓ Check grammar** appears above the
    keys. Tap it to see the suggested changes: added words in green, removed words
@@ -66,8 +67,12 @@ the same budget, if their layer widths are multiples of 256.
 - Prompts include one worked example per language, because small models follow
   an example more reliably than instructions alone. Qwen3's thinking mode is
   turned off.
-- On Android, the processed fixed part of each language's prompt (instructions
-  and example, about 25 MB per language) is kept in the app's cache. After the
-  first check, a check only has to read the selected text. Android may clear this
-  cache at any time.
+- On Android, the fixed part of each language's prompt (instructions and
+  example) is processed once, right after the model is installed, and kept in the
+  app's cache (about 22 MB per language). A check then only has to read the
+  selected text. If Android clears the cache, the next check rebuilds it.
+- A correction mostly repeats the original text, so while answering, the check
+  guesses the next few tokens from the selection and confirms them all in one
+  pass of the model instead of one pass per token. The answer is exactly the same;
+  on lightly edited text it needs several times fewer passes.
 - A selection is limited to about 384 tokens (a few sentences).

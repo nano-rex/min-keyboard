@@ -22,14 +22,12 @@ fn main() {
     };
     let loaded = started.elapsed();
     let language = grammar::detect_language(&text, false);
-    let mut tokens = 0usize;
     let mut first: Option<Instant> = None;
     let started = Instant::now();
     let result = checker.check(
         &text,
         language,
         &mut |_| {
-            tokens += 1;
             first.get_or_insert_with(Instant::now);
         },
         &|| false,
@@ -41,12 +39,12 @@ fn main() {
             let prompt = first.map(|f| f - started).unwrap_or(total);
             let generation = total - prompt;
             eprintln!(
-                "{} · {language:?} · {threads} threads · load {:.2}s · prompt {:.2}s · {tokens} tokens in {:.2}s ({:.1}/s)",
+                "{} · {language:?} · {threads} threads · load {:.2}s · prompt {:.2}s · answer {:.2}s in {} passes",
                 checker.model_name(),
                 loaded.as_secs_f32(),
                 prompt.as_secs_f32(),
                 generation.as_secs_f32(),
-                tokens.saturating_sub(1) as f32 / generation.as_secs_f32().max(1e-3)
+                checker.answer_passes,
             );
         }
         Err(e) => {

@@ -6,6 +6,8 @@
 // dereferenced here, so functions taking them need not be `unsafe`.
 #![allow(non_camel_case_types, non_snake_case, clippy::missing_safety_doc, clippy::not_unsafe_ptr_arg_deref)]
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CString};
 use std::ptr::null_mut;
 
@@ -49,6 +51,7 @@ const EXCEPTION_CLEAR: usize = 17;
 const NEW_GLOBAL_REF: usize = 21;
 const DELETE_GLOBAL_REF: usize = 22;
 const DELETE_LOCAL_REF: usize = 23;
+const IS_SAME_OBJECT: usize = 24;
 const NEW_OBJECT_A: usize = 30;
 const GET_OBJECT_CLASS: usize = 31;
 const IS_INSTANCE_OF: usize = 32;
@@ -85,6 +88,12 @@ const EXCEPTION_CHECK: usize = 228;
 const ATTACH_CURRENT_THREAD: usize = 4;
 const DETACH_CURRENT_THREAD: usize = 5;
 const GET_ENV: usize = 6;
+
+thread_local! {
+    /// Method IDs by "name signature", with the class (a global reference) each belongs to.
+    /// Looking a method up by name is slow, and the keyboard makes hundreds of calls per frame.
+    static METHODS: RefCell<HashMap<String, Vec<(jclass, jmethodID)>>> = RefCell::new(HashMap::new());
+}
 
 /// A Java value passed to or returned from a call.
 #[derive(Clone, Copy, Debug)]
@@ -244,15 +253,34 @@ impl Env {
         self.checked(id).and_then(|id| if id.is_null() { Err(JavaException) } else { Ok(id) })
     }
 
+    fn is_same_object(&self, a: jobject, b: jobject) -> bool {
+        unsafe { jni_fn!(self, IS_SAME_OBJECT, fn(jobject, jobject) -> jboolean)(self.raw, a, b) != 0 }
+    }
+
+    /// The method ID for `obj`'s class, looked up once per class and remembered.
+    fn instance_method(&self, obj: jobject, name: &str, signature: &str) -> JResult<jmethodID> {
+        let class = self.object_class(obj);
+        let key = [name, " ", signature].concat();
+        let cached = METHODS.with(|methods| {
+            methods.borrow().get(&key).and_then(|list| list.iter().find(|(c, _)| self.is_same_object(*c, class)).map(|&(_, id)| id))
+        });
+        let id = match cached {
+            Some(id) => Ok(id),
+            None => self.method_id(class, name, signature, false).inspect(|&id| {
+                let global = self.new_global(class);
+                METHODS.with(|methods| methods.borrow_mut().entry(key).or_default().push((global, id)));
+            }),
+        };
+        self.delete_local(class);
+        id
+    }
+
     /// Calls an instance method, dispatching on the signature's return type.
     pub fn call(&self, obj: jobject, name: &str, signature: &str, args: &[Value]) -> JResult<Value> {
         if obj.is_null() {
             return Err(JavaException);
         }
-        let class = self.object_class(obj);
-        let id = self.method_id(class, name, signature, false);
-        self.delete_local(class);
-        let id = id?;
+        let id = self.instance_method(obj, name, signature)?;
         let args: Vec<jvalue> = args.iter().map(|a| a.raw()).collect();
         let a = args.as_ptr();
         let value = unsafe {

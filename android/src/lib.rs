@@ -88,6 +88,22 @@ pub fn power_state(env: Env, context: jobject) -> (bool, bool) {
 
 /// Starts a check on the shared worker, after the checks that need the Android context.
 pub fn start_check(env: Env, context: jobject, text: &str, language: grammar::Language, on_update: Box<dyn Fn(grammar::Update) + Send>) {
+    start_job(env, context, text, language, false, on_update);
+}
+
+/// Processes the fixed part of every language's prompt now, so the first check is quick.
+pub fn start_prepare(env: Env, context: jobject, on_update: Box<dyn Fn(grammar::Update) + Send>) {
+    start_job(env, context, "", grammar::Language::English, true, on_update);
+}
+
+fn start_job(
+    env: Env,
+    context: jobject,
+    text: &str,
+    language: grammar::Language,
+    prepare_only: bool,
+    on_update: Box<dyn Fn(grammar::Update) + Send>,
+) {
     if cfg!(not(target_pointer_width = "64")) {
         return on_update(grammar::Update::Error("The AI check needs a 64-bit CPU.".into()));
     }
@@ -104,6 +120,7 @@ pub fn start_check(env: Env, context: jobject, text: &str, language: grammar::La
         text: text.to_string(),
         language,
         threads: if power_save { 1 } else { grammar::default_threads() },
+        prepare_only,
         on_update,
     });
 }
@@ -595,6 +612,10 @@ struct Paint {
     aligns: [jobject; 3],
     state: Option<(f32, bool, keyboard::Align)>,
     color: Option<u32>,
+    /// Text widths by (text, size bits, bold): labels are measured again on every frame.
+    widths: std::collections::HashMap<(String, u32, bool), f32>,
+    /// Font ascent and descent by (size bits, bold).
+    metrics: std::collections::HashMap<(u32, bool), (f32, f32)>,
 }
 
 impl Paint {
@@ -618,6 +639,8 @@ impl Paint {
             aligns: [align("LEFT")?, align("CENTER")?, align("RIGHT")?],
             state: None,
             color: None,
+            widths: std::collections::HashMap::new(),
+            metrics: std::collections::HashMap::new(),
         })
     }
 
@@ -696,18 +719,33 @@ impl Canvas for AndroidCanvas<'_> {
     }
 
     fn measure(&mut self, text: &str, size: f32, bold: bool) -> f32 {
+        let key = (text.to_string(), size.to_bits(), bold);
+        if let Some(&width) = self.paint.widths.get(&key) {
+            return width;
+        }
         let align = self.paint.state.map(|s| s.2).unwrap_or(keyboard::Align::Left);
         self.paint.set_font(self.env, size, bold, align);
         let Ok(s) = self.env.string(text) else { return 0.0 };
         let s = Local::new(self.env, s);
-        self.env.call(self.paint.paint, "measureText", "(Ljava/lang/String;)F", &[Value::Obj(s.obj)]).map(Value::float).unwrap_or(0.0)
+        let width =
+            self.env.call(self.paint.paint, "measureText", "(Ljava/lang/String;)F", &[Value::Obj(s.obj)]).map(Value::float).unwrap_or(0.0);
+        if self.paint.widths.len() > 4096 {
+            self.paint.widths.clear(); // candidates come and go; keep the cache small
+        }
+        self.paint.widths.insert(key, width);
+        width
     }
 
     fn metrics(&mut self, size: f32, bold: bool) -> (f32, f32) {
+        if let Some(&metrics) = self.paint.metrics.get(&(size.to_bits(), bold)) {
+            return metrics;
+        }
         let align = self.paint.state.map(|s| s.2).unwrap_or(keyboard::Align::Left);
         self.paint.set_font(self.env, size, bold, align);
         let get = |name: &str| self.env.call(self.paint.paint, name, "()F", &[]).map(Value::float).unwrap_or(0.0);
-        (get("ascent"), get("descent"))
+        let metrics = (get("ascent"), get("descent"));
+        self.paint.metrics.insert((size.to_bits(), bold), metrics);
+        metrics
     }
 
     fn clip(&mut self, r: Rect) {

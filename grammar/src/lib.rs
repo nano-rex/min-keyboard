@@ -148,6 +148,8 @@ pub struct Checker {
     cache_dir: Option<PathBuf>,
     /// Identifies the model file, so saved prompts of another model are not used.
     identity: String,
+    /// Model passes the last check needed after reading the prompt (for measuring speed).
+    pub answer_passes: usize,
 }
 
 impl Checker {
@@ -166,7 +168,7 @@ impl Checker {
         let metadata = std::fs::metadata(path)?;
         let modified = metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
         let identity = format!("{}:{}:{}", model.name, metadata.len(), modified);
-        Ok(Checker { model, pool: Pool::new(threads), cache, thinking_model, cache_dir: None, identity })
+        Ok(Checker { model, pool: Pool::new(threads), cache, thinking_model, cache_dir: None, identity, answer_passes: 0 })
     }
 
     /// Keeps the processed fixed part of the prompt in `dir`, so the first check after loading
@@ -233,6 +235,28 @@ impl Checker {
         (tokens, prefix_len, input_len)
     }
 
+    /// Loads the language's processed fixed prompt from the cache folder if it is there. Returns
+    /// the file to save it to once processed, if it was not.
+    fn restore_prefix(&mut self, prefix: &[u32]) -> Option<PathBuf> {
+        if self.cache.tokens.starts_with(prefix) {
+            return None;
+        }
+        let file = self.prefix_file(prefix)?;
+        (!self.cache.restore(&file, prefix, self.model.kv_dim())).then_some(file)
+    }
+
+    /// Processes and saves the fixed part of the language's prompt, so that a later check (even
+    /// after the model was unloaded) only has to read the user's text.
+    pub fn prepare(&mut self, language: Language, stop: &dyn Fn() -> bool) -> Result<(), CheckError> {
+        let (prompt, prefix_len, _) = self.prompt("", language);
+        let prefix = &prompt[..prefix_len];
+        if let Some(file) = self.restore_prefix(prefix) {
+            self.model.prompt(&self.pool, &mut self.cache, prefix, stop).ok_or(CheckError::Cancelled)?;
+            self.cache.save(&file, prefix_len).map_err(|e| CheckError::Failed(format!("could not save the prepared model: {e}")))?;
+        }
+        Ok(())
+    }
+
     /// Proofreads `text`; `on_partial` sees the answer as it grows.
     pub fn check(
         &mut self,
@@ -245,38 +269,74 @@ impl Checker {
         if input_len > MAX_INPUT_TOKENS {
             return Err(CheckError::TooLong);
         }
-        let prefix = &prompt[..prefix_len];
-        let file = self.prefix_file(prefix);
-        let mut save = false;
-        if !self.cache.tokens.starts_with(prefix) {
-            if let Some(file) = &file {
-                save = !self.cache.restore(file, prefix, self.model.kv_dim());
-            }
-        }
-        let mut logits = self.model.prompt(&self.pool, &mut self.cache, &prompt, stop).ok_or(CheckError::Cancelled)?;
-        if let (true, Some(file)) = (save, &file) {
+        let save = self.restore_prefix(&prompt[..prefix_len]);
+        let logits = self.model.prompt(&self.pool, &mut self.cache, &prompt, stop).ok_or(CheckError::Cancelled)?;
+        if let Some(file) = save {
             // Best effort: without the file the next load just reads the whole prompt again.
-            let _ = self.cache.save(file, prefix_len);
+            let _ = self.cache.save(&file, prefix_len);
         }
         let max_answer = MAX_ANSWER_TOKENS.min(input_len * 2 + 32);
-        let tokenizer = &self.model.tokenizer;
-        let mut answer: Vec<u8> = Vec::new();
-        for _ in 0..max_answer {
+        let input = &prompt[prefix_len..prefix_len + input_len];
+        let model = &self.model;
+        let tokenizer = &model.tokenizer;
+        let mut answer: Vec<u32> = Vec::new();
+        let mut next = argmax(&logits);
+        let mut cursor = 0;
+        // Guess further after full agreement and less after a miss, since every guessed token
+        // costs a share of a pass even when it is rejected.
+        let mut draft_len = 3;
+        self.answer_passes = 0;
+        while answer.len() < max_answer {
             if stop() {
                 return Err(CheckError::Cancelled);
             }
-            let token = argmax(&logits);
-            if tokenizer.end_of_generation.contains(&token) {
+            if tokenizer.end_of_generation.contains(&next) {
                 break;
             }
-            answer.extend_from_slice(tokenizer.token_bytes(token));
-            if let Ok(so_far) = std::str::from_utf8(&answer) {
+            answer.push(next);
+            let bytes: Vec<u8> = answer.iter().flat_map(|&t| tokenizer.token_bytes(t).iter().copied()).collect();
+            if let Ok(so_far) = std::str::from_utf8(&bytes) {
                 on_partial(&clean_answer(so_far));
             }
-            logits = self.model.forward(&self.pool, &mut self.cache, &[token]);
+            // A correction mostly copies the input, so guess the next tokens from it and let one
+            // batched pass confirm them. The result is exactly what one token at a time gives.
+            let draft = draft_from_input(input, &answer, &mut cursor, draft_len.min(max_answer - answer.len()));
+            let start = self.cache.tokens.len();
+            let mut fed = vec![next];
+            fed.extend_from_slice(&draft);
+            let predicted = model.greedy(&self.pool, &mut self.cache, &fed);
+            self.answer_passes += 1;
+            let accepted = draft.iter().zip(&predicted).take_while(|(d, p)| d == p).count();
+            if accepted < draft.len() {
+                self.cache.truncate(start + 1 + accepted, model.kv_dim());
+            }
+            answer.extend_from_slice(&draft[..accepted]);
+            if !draft.is_empty() {
+                draft_len = if accepted == draft.len() { (draft_len * 2).min(MAX_DRAFT_TOKENS) } else { (accepted + 1).max(2) };
+            }
+            next = predicted[accepted];
         }
-        Ok(clean_answer(&String::from_utf8_lossy(&answer)))
+        let bytes: Vec<u8> = answer.iter().flat_map(|&t| tokenizer.token_bytes(t).iter().copied()).collect();
+        Ok(clean_answer(&String::from_utf8_lossy(&bytes)))
     }
+}
+
+/// The most input tokens guessed ahead in one pass.
+const MAX_DRAFT_TOKENS: usize = 12;
+
+/// Guesses the tokens that follow `answer` by finding its last few tokens in `input` (at or after
+/// `cursor` first, where the previous match was) and copying what comes after them there.
+fn draft_from_input(input: &[u32], answer: &[u32], cursor: &mut usize, limit: usize) -> Vec<u32> {
+    for n in (1..=3.min(answer.len())).rev() {
+        let tail = &answer[answer.len() - n..];
+        let found =
+            (*cursor..input.len().saturating_sub(n - 1)).chain(0..(*cursor).min(input.len())).find(|&i| input.get(i..i + n) == Some(tail));
+        if let Some(i) = found {
+            *cursor = i + n;
+            return input[i + n..].iter().copied().take(limit).collect();
+        }
+    }
+    Vec::new()
 }
 
 /// Progress of a check, reported by the [`Worker`].
@@ -295,6 +355,9 @@ pub struct Request {
     pub text: String,
     pub language: Language,
     pub threads: usize,
+    /// Instead of checking `text`, process the fixed part of every language's prompt ahead of
+    /// time (see [`Checker::prepare`]); `Done` follows with an empty text.
+    pub prepare_only: bool,
     pub on_update: Box<dyn Fn(Update) + Send>,
 }
 
@@ -382,6 +445,19 @@ fn run_worker(receiver: &mpsc::Receiver<Message>, latest: &AtomicU64) {
         }
         let Some((_, _, _, checker)) = &mut loaded else { continue };
         if stale() {
+            continue;
+        }
+        if request.prepare_only {
+            let mut result = Ok(());
+            for language in [Language::English, Language::Mandarin, Language::Malay] {
+                update(Update::Status(format!("Preparing the model for {}…", language.name())));
+                result = result.and_then(|_| checker.prepare(language, &stale));
+            }
+            match result {
+                Ok(()) if !stale() => update(Update::Done(String::new())),
+                Ok(()) | Err(CheckError::Cancelled) => {}
+                Err(e) => update(Update::Error(e.to_string())),
+            }
             continue;
         }
         update(Update::Status(format!("Checking {}…", request.language.name())));
