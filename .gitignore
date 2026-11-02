@@ -1,12 +1,4 @@
-.gradle/
-local.properties
-/build/
-/app/build/
-/android/app/build/
-/android/.gradle/
-android/local.properties
-*.iml
+/target/
 data/
-.cxx/
 __pycache__/
 *.gguf

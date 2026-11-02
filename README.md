@@ -3,9 +3,11 @@
 [![CI](https://github.com/nano-rex/min-keyboard/actions/workflows/ci.yml/badge.svg)](https://github.com/nano-rex/min-keyboard/actions/workflows/ci.yml)
 
 A minimal offline keyboard: an Android IME and a standalone Linux desktop program. It types English,
-Malay, Simplified Chinese, Traditional Chinese, Japanese and Korean, with an optional on-device
-AI grammar check for English, Mandarin and Malay. Nothing you type leaves the device: the Android
-app has no internet permission.
+Malay, Simplified Chinese, Traditional Chinese, Japanese and Korean. Nothing you type leaves the
+device: the Android app has no internet permission.
+
+The Android app is written entirely in Rust with no third-party crates, and it builds without Java,
+Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works).
 
 ## Features
 
@@ -17,29 +19,58 @@ app has no internet permission.
 | Japanese | Romaji → hiragana/katakana with kanji conversion (`nihon` → 日本, `watashi` → 私) | 131,000 readings (SKK) |
 | Korean | Romanization → Hangul words (`gamsahamnida` → 감사합니다) with syllable-by-syllable fallback | 97,000 keys |
 
-- **AI grammar check (optional).** Tap ✓ to proofread the current sentence with a small model that
-  runs on the phone. A built-in device check recommends a model that fits the hardware, or says
-  that none does. The model uses at most a quarter of the RAM and half the CPU cores, and unloads
-  when idle, so other apps keep running smoothly. See [docs/ai-grammar-check.md](docs/ai-grammar-check.md).
 - **Look and feel.** Rounded keys with depth, light, dark or system theme, key previews, haptic
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
   name on the space bar.
 - Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
+- The Linux edition has an optional on-device AI grammar check; see
+  [docs/ai-grammar-check.md](docs/ai-grammar-check.md).
 
 ## Android
 
-Build a debug APK (needs JDK 17 and the Android SDK; the NDK and CMake are installed by Gradle when missing):
+You need Rust (via rustup) and the Android SDK's `build-tools` and `platforms;android-34`.
+From the NDK, only the sysroot libraries are used; its compilers are not.
 
 ```bash
-./android/gradlew -p android :app:assembleDebug
-./android/gradlew -p android :app:testDebugUnitTest   # engine, advisor and diff tests
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+export ANDROID_HOME=~/Android/Sdk          # and ANDROID_NDK_HOME if the NDK is not in $ANDROID_HOME/ndk
+cargo run -p apkbuild                      # writes target/apk/min-keyboard.apk
+cargo test --workspace                     # engines, keyboard logic, dictionary tool, APK tooling
 ```
+
+`cargo run -p apkbuild -- --help` lists the options, such as `--abi arm64-v8a` for a faster
+single-ABI build. Signing uses the system `openssl` command. By default the APK is signed with
+`~/.android/debug.keystore`, the same key Android Studio uses, so it installs over earlier debug
+builds; the keystore is created if it is missing. For a release, pass `--keystore` and
+`--keystore-pass`, or `--key key.pem --cert cert.pem`.
 
 Install and enable:
 
-1. Install the APK and open **Min Keyboard**.
+1. Install the APK (`adb install target/apk/min-keyboard.apk`) and open **Min Keyboard**.
 2. Tap **Open input settings** and enable the keyboard, then **Choose keyboard**.
-3. Optional: under **AI grammar check**, follow the device check to install a model.
+
+### How the Android build works
+
+Android only binds an input method to a Java class that extends `InputMethodService`, so an APK
+still needs a `classes.dex`. `tools/apkbuild` writes that file itself. It declares four small
+classes whose methods are `native` and implemented in Rust:
+
+| Class | Purpose |
+| --- | --- |
+| `ConvoyPinyinImeService` | The input method service |
+| `KeyboardView` | One view that Rust lays out, draws through `android.graphics.Canvas`, and handles touches for |
+| `SetupActivity` | The settings screen; the layout is `android/res/layout/activity_setup.xml` |
+| `NativeCallback` | Click, switch and timer listeners that call back into Rust |
+
+The rest of the build:
+
+1. `cargo` compiles `libminkeyboard.so` for each ABI, and `rust-lld` links it against the NDK sysroot.
+2. `aapt2` compiles the manifest and resources and adds the dictionaries. It is a native SDK tool.
+3. `apkbuild` adds the DEX and the libraries, aligns the archive (libraries to 16 KiB pages), and
+   signs it with APK Signature Scheme v2.
+
+Settings are stored in the same `SharedPreferences` file as the earlier Java app, so they carry
+over on upgrade.
 
 ## Linux
 
@@ -56,23 +87,25 @@ See [linux/README.md](linux/README.md) for hotkeys, configuration and the option
 ## Repository layout
 
 ```text
-android/app/src/main/java/   keyboard service, engines (Latin, Pinyin, Japanese, Korean), AI advisor and settings
-android/app/src/main/cpp/    llama.cpp-based grammar engine and JNI bridge
-android/app/src/main/assets/ dictionaries, shared with the Linux edition
-android/app/src/test/        JVM unit tests
-linux/                       Linux edition and its tests
-tools/                       dictionary builders and a desktop grammar-check CLI
-docs/                        dictionary sources and licenses, AI design notes
+engines/          input engines (Latin, Pinyin, Japanese, Korean) and their tests
+android/          the Android app: Rust sources (src/), manifest and resources (res/)
+tools/apkbuild/   builds and signs the APK, including the generated classes.dex
+tools/dicttool/   builds the dictionaries in assets/
+assets/           dictionaries, shared with the Linux edition
+linux/            Linux edition and its tests
+docs/             dictionary sources and licenses, AI grammar check notes
 ```
 
 ## Dictionaries
 
-The dictionaries are generated from open word lists. Sources, licenses and rebuild commands are in
-[docs/dictionary-sources.md](docs/dictionary-sources.md).
+The dictionaries are generated from open word lists by `cargo run -p dicttool`. Sources, licenses
+and rebuild commands are in [docs/dictionary-sources.md](docs/dictionary-sources.md).
 
 ## Not included
 
-Cloud sync, online prediction, handwriting, voice input and gesture typing.
+Cloud sync, online prediction, handwriting, voice input and gesture typing. Version 0.3.0, the Rust
+rewrite, drops the Android AI grammar check that 0.2.0 had through llama.cpp; the Linux edition
+still has it.
 
 ## License
 

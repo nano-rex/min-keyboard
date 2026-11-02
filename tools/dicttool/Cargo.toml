@@ -1,0 +1,6 @@
+[package]
+name = "dicttool"
+description = "Builds the frequency-ranked dictionaries in assets/"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

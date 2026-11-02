@@ -1,0 +1,9 @@
+[package]
+name = "min-keyboard-engines"
+description = "Input engines (Latin, Pinyin, Japanese, Korean) shared by the Min Keyboard apps"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "engines"

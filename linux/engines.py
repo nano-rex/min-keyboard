@@ -1,13 +1,13 @@
 """Candidate engines for the Linux edition, mirroring the Android ones.
 
-They read the same assets as the Android app (android/app/src/main/assets/).
+They read the same assets as the Android app (assets/), whose engines live in engines/ (Rust).
 """
 
 import bisect
 import math
 from pathlib import Path
 
-ASSETS = Path(__file__).resolve().parents[1] / "android" / "app" / "src" / "main" / "assets"
+ASSETS = Path(__file__).resolve().parents[1] / "assets"
 MAX_CANDIDATES = 32
 
 
@@ -179,7 +179,7 @@ for _consonant, _kana in (("k", "き"), ("g", "ぎ"), ("s", "し"), ("z", "じ")
 
 
 def to_hiragana(romaji, finish=True):
-    """Romaji to hiragana, matching the Android converter (see JapaneseEngine.java)."""
+    """Romaji to hiragana, matching the Android converter (see engines/src/japanese.rs)."""
     out, i, text = [], 0, romaji.lower()
     while i < len(text):
         c = text[i]

@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">Min Keyboard</string>
+    <string name="setup_title">Min Keyboard</string>
+    <string name="setup_summary">An offline keyboard for English, Malay, Chinese, Japanese and Korean.</string>
+    <string name="setup_step_enable">1. Enable Min Keyboard in the system input settings.</string>
+    <string name="setup_step_select">2. Switch to Min Keyboard.</string>
+    <string name="open_input_settings">Open input settings</string>
+    <string name="open_input_picker">Choose keyboard</string>
+    <string name="setup_note">Typing never leaves your device. Min Keyboard has no internet permission.</string>
+
+    <string name="section_setup">Get started</string>
+    <string name="section_appearance">Appearance and feel</string>
+    <string name="section_typing">Typing</string>
+    <string name="section_languages">Languages</string>
+
+    <string name="theme">Theme</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="key_vibration">Vibrate on key press</string>
+    <string name="key_popup">Show key preview when pressed</string>
+    <string name="number_row_hints">Long-press top row for numbers</string>
+    <string name="auto_correct">Auto-correct English and Malay</string>
+    <string name="auto_space">Add a space after picking a suggestion</string>
+    <string name="language_english">English</string>
+    <string name="language_malay">Malay (Bahasa Melayu)</string>
+    <string name="language_simplified">Simplified Chinese</string>
+    <string name="language_traditional">Traditional Chinese</string>
+    <string name="language_japanese">Japanese</string>
+    <string name="language_korean">Korean</string>
+</resources>

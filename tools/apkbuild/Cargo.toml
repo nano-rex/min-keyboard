@@ -1,0 +1,6 @@
+[package]
+name = "apkbuild"
+description = "Builds the Min Keyboard APK without Java: generates the DEX stubs, packages, aligns and signs"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

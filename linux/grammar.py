@@ -1,7 +1,7 @@
 """Optional on-device grammar check for the Linux edition.
 
-Uses llama-cpp-python (`pip install llama-cpp-python`) with the same GGUF models
-and prompts as the Android app (android/app/src/main/cpp/grammar_core.cpp).
+Uses llama-cpp-python (`pip install llama-cpp-python`) with the GGUF models listed in
+docs/ai-grammar-check.md.
 Everything here is optional: without the package or a model the app works as before.
 """
 
@@ -46,7 +46,7 @@ def system_prompt(language):
 
 
 def memory_problem(model_path):
-    """Same budget as Android: at most 1/4 of RAM and 1/2 of what is free. None if it fits."""
+    """At most 1/4 of RAM and 1/2 of what is free. None if it fits."""
     try:
         meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
         total = int(meminfo["MemTotal"].split()[0]) * 1024

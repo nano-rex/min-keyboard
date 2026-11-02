@@ -6,8 +6,7 @@ connection. The window contains its own text editor, on-screen keyboard,
 candidate recommendations, language controls, and hotkeys.
 
 The program is implemented with Python’s standard-library `tkinter` GUI and
-reuses the generated dictionary assets from
-`android/app/src/main/assets/`.
+reuses the generated dictionary assets in `assets/`.
 
 ## Features
 
@@ -118,10 +117,9 @@ model = ~/models/Qwen3-1.7B-Q4_K_M.gguf
 ```
 
 A **✓ Check grammar** button appears. It proofreads the selection, or the
-current line, and shows the suggestion for you to review before replacing. As on
-Android, the model may use at most a quarter of your RAM and half of what is
-free, runs on half of the CPU cores, and is unloaded after a minute without
-checks. Prompts and models are shared with the Android app; see
+current line, and shows the suggestion for you to review before replacing. The
+model may use at most a quarter of your RAM and half of what is free, runs on
+half of the CPU cores, and is unloaded after a minute without checks. See
 [`docs/ai-grammar-check.md`](../docs/ai-grammar-check.md).
 
 ## Tests
