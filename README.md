@@ -24,6 +24,7 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
   name on the space bar.
 - Shift capitalises the next letter only; tap it twice to lock capitals (⇪).
 - Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
+- Space types the full-width 　 in Chinese and Japanese; a setting switches it to a normal space.
 - **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some
   text and tap **✓ Check grammar** above the keys; the keyboard shows the changes and replaces
   the selection only if you tap **Replace**. It never runs while you type. The model runs on the

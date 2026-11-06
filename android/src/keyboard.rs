@@ -174,6 +174,8 @@ pub struct Settings {
     pub number_hints: bool,
     /// Show the AI check button while text is selected.
     pub grammar_button: bool,
+    /// Space types " " in Chinese and Japanese instead of the full-width U+3000.
+    pub normal_space: bool,
     /// Enabled flags, indexed like [`MODES`].
     pub languages: [bool; 6],
 }
@@ -188,6 +190,7 @@ impl Default for Settings {
             key_popup: true,
             number_hints: true,
             grammar_button: false,
+            normal_space: false,
             languages: [true; 6],
         }
     }
@@ -887,7 +890,8 @@ impl Keyboard {
         } else if !self.composing.is_empty() {
             self.commit_top_candidate(editor, host);
         } else {
-            editor.commit_text(if self.mode == Mode::Korean { " " } else { "\u{3000}" });
+            let normal = self.mode == Mode::Korean || self.settings.normal_space;
+            editor.commit_text(if normal { " " } else { "\u{3000}" });
         }
     }
 
@@ -2001,6 +2005,19 @@ mod tests {
         assert_eq!(editor.text, "我爱你");
         tap_key(&mut kb, ",", &mut editor);
         assert_eq!(editor.text, "我爱你，");
+    }
+
+    #[test]
+    fn space_is_wide_in_chinese_unless_normal_space_is_on() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.set_mode(Mode::Simplified, &mut editor, &mut host);
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "\u{3000}");
+        kb.apply_settings(Settings { normal_space: true, ..Settings::default() });
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "\u{3000} ");
     }
 
     #[test]

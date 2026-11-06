@@ -24,12 +24,19 @@ pub fn with_activity<R>(f: impl FnOnce(jobject) -> R) -> Option<R> {
 
 /// Every switch on the screen: (view id, preference key, default).
 fn switches() -> Vec<(String, String, bool)> {
-    let mut all: Vec<(String, String, bool)> =
-        ["vibration_toggle", "popup_toggle", "number_hints_toggle", "auto_correct_toggle", "auto_space_toggle", "grammar_button_toggle"]
-            .iter()
-            .zip(prefs::SWITCHES)
-            .map(|(id, (key, default))| (id.to_string(), key.to_string(), default))
-            .collect();
+    let mut all: Vec<(String, String, bool)> = [
+        "vibration_toggle",
+        "popup_toggle",
+        "number_hints_toggle",
+        "auto_correct_toggle",
+        "auto_space_toggle",
+        "grammar_button_toggle",
+        "normal_space_toggle",
+    ]
+    .iter()
+    .zip(prefs::SWITCHES)
+    .map(|(id, (key, default))| (id.to_string(), key.to_string(), default))
+    .collect();
     for mode in MODES {
         let language = mode.language_key();
         all.push((format!("language_{language}_toggle"), format!("{}{language}", prefs::KEY_LANGUAGE_PREFIX), true));
