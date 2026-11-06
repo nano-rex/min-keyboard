@@ -3,6 +3,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use engines::{japanese, korean, Assets, JapaneseEngine, KoreanEngine, LatinEngine, PinyinEngine, ScriptMode};
 use grammar::{Change, Language, Update};
@@ -336,6 +337,7 @@ const ROW1_DIGITS: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
 const ROW2: &[&str] = &["a", "s", "d", "f", "g", "h", "j", "k", "l"];
 const ROW3: &[&str] = &[KEY_SHIFT, "z", "x", "c", "v", "b", "n", "m", KEY_BACKSPACE];
 const ROW4: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, ".", KEY_ENTER];
+const ROW4_JAPANESE: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, "ー", ".", KEY_ENTER];
 
 const EN_SYMBOLS: [&[&str]; 4] = [
     &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
@@ -374,6 +376,8 @@ const IME_ACTION_UNSPECIFIED: i32 = 0;
 const IME_ACTION_NONE: i32 = 1;
 const IME_FLAG_NO_ENTER_ACTION: i32 = 0x4000_0000;
 const TYPE_TEXT_FLAG_MULTI_LINE: i32 = 0x0002_0000;
+const TYPE_MASK_CLASS: i32 = 0xf;
+const TYPE_NULL: i32 = 0;
 
 fn is_function_key(key: &str) -> bool {
     matches!(key, KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS)
@@ -391,15 +395,29 @@ fn is_composing_char(ch: char) -> bool {
     ch.is_ascii_alphabetic() || ch == '\''
 }
 
-/// Keeps the user's capitalisation: "Teh" -> "The", and Shift capitalises suggestions.
-fn match_case(word: &str, typed: &str, shift_on: bool) -> String {
-    let capital = shift_on || typed.chars().next().is_some_and(char::is_uppercase);
+/// Keeps the user's capitalisation: "Teh" -> "The", Shift capitalises suggestions and caps lock
+/// gives "THE".
+fn match_case(word: &str, typed: &str, shift: Shift) -> String {
+    if shift == Shift::Locked {
+        return word.to_uppercase();
+    }
+    let capital = shift == Shift::Once || typed.chars().next().is_some_and(char::is_uppercase);
     let mut chars = word.chars();
     match chars.next() {
         Some(first) if capital => first.to_uppercase().chain(chars).collect(),
         _ => word.to_string(),
     }
 }
+
+/// Shift applies to the next letter only; tapping it twice in quick succession locks it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Shift {
+    Off,
+    Once,
+    Locked,
+}
+
+const DOUBLE_TAP_MS: u128 = 400;
 
 struct Key {
     key: &'static str,
@@ -528,7 +546,9 @@ pub struct Keyboard {
     candidates_dirty: bool,
     seen_generation: u64,
     mode: Mode,
-    shift_on: bool,
+    shift: Shift,
+    /// When Shift was last turned on, to recognise a double tap.
+    shift_tapped: Option<Instant>,
     symbols_mode: bool,
     symbols_page_two: bool,
     suggestions_expanded: bool,
@@ -565,7 +585,8 @@ impl Keyboard {
             candidates_dirty: true,
             seen_generation: 0,
             mode: Mode::English,
-            shift_on: false,
+            shift: Shift::Off,
+            shift_tapped: None,
             symbols_mode: false,
             symbols_page_two: false,
             suggestions_expanded: false,
@@ -635,7 +656,7 @@ impl Keyboard {
             self.engines.preload(self.mode);
         }
         self.composing.clear();
-        self.shift_on = false;
+        self.shift = Shift::Off;
         self.rebuild();
         self.schedule_refresh(host);
     }
@@ -687,6 +708,7 @@ impl Keyboard {
     fn rows(&self) -> [&'static [&'static str]; 4] {
         let latin = self.mode.is_latin();
         match (self.symbols_mode, latin, self.symbols_page_two) {
+            (false, _, _) if self.mode == Mode::Japanese => [ROW1, ROW2, ROW3, ROW4_JAPANESE],
             (false, _, _) => [ROW1, ROW2, ROW3, ROW4],
             (true, true, false) => EN_SYMBOLS,
             (true, true, true) => EN_SYMBOLS_2,
@@ -719,8 +741,10 @@ impl Keyboard {
     fn label_for(&self, key: &str) -> String {
         let latin = self.mode.is_latin();
         match key {
+            "," if self.mode == Mode::Japanese => "、".into(),
             "," if !latin => "，".into(),
             "." if !latin => "。".into(),
+            KEY_SHIFT if self.shift == Shift::Locked => "⇪".into(),
             KEY_SHIFT => "⇧".into(),
             KEY_SPACE => self.mode.space_label().into(),
             KEY_ENTER => "↵".into(),
@@ -730,7 +754,7 @@ impl Keyboard {
             _ => {
                 let mut chars = key.chars();
                 match (chars.next(), chars.next()) {
-                    (Some(c), None) if c.is_alphabetic() && self.shift_on => c.to_uppercase().collect(),
+                    (Some(c), None) if c.is_alphabetic() && self.shift != Shift::Off => c.to_uppercase().collect(),
                     _ => key.into(),
                 }
             }
@@ -745,7 +769,13 @@ impl Keyboard {
         }
         match key {
             KEY_SHIFT => {
-                self.shift_on = !self.shift_on;
+                let double_tap = self.shift_tapped.is_some_and(|at| at.elapsed().as_millis() < DOUBLE_TAP_MS);
+                self.shift = match self.shift {
+                    Shift::Off => Shift::Once,
+                    Shift::Once if double_tap => Shift::Locked,
+                    Shift::Once | Shift::Locked => Shift::Off,
+                };
+                self.shift_tapped = (self.shift == Shift::Once).then(Instant::now);
                 self.schedule_refresh(host);
             }
             KEY_BACKSPACE => self.handle_backspace(editor, host),
@@ -812,6 +842,15 @@ impl Keyboard {
     fn handle_text_key(&mut self, value: &str, editor: &mut dyn Editor, host: &mut dyn Host) {
         let mut chars = value.chars();
         let Some(ch) = chars.next() else { return };
+        if self.shift == Shift::Once && ch.is_alphabetic() {
+            self.shift = Shift::Off;
+        }
+        // The long-vowel mark continues the word being typed ("ra-men" is らーめん).
+        if self.mode == Mode::Japanese && ch == 'ー' && !self.composing.is_empty() {
+            self.composing.push('-');
+            self.schedule_refresh(host);
+            return;
+        }
         if self.symbols_mode || !is_composing_char(ch) || chars.next().is_some() {
             self.finish_composing(editor, host);
             editor.commit_text(value);
@@ -865,7 +904,10 @@ impl Keyboard {
         let (options, input_type) = info.unwrap_or((0, 0));
         let action = if info.is_none() { IME_ACTION_NONE } else { options & IME_MASK_ACTION };
         let multi_line = info.is_some() && input_type & TYPE_TEXT_FLAG_MULTI_LINE != 0;
-        if !multi_line && action != IME_ACTION_NONE && action != IME_ACTION_UNSPECIFIED && options & IME_FLAG_NO_ENTER_ACTION == 0 {
+        if info.is_some() && input_type & TYPE_MASK_CLASS == TYPE_NULL {
+            // Terminals such as Termux take no text type and read a typed newline as Enter.
+            editor.commit_text("\n");
+        } else if !multi_line && action != IME_ACTION_NONE && action != IME_ACTION_UNSPECIFIED && options & IME_FLAG_NO_ENTER_ACTION == 0 {
             editor.perform_editor_action(action);
         } else {
             editor.send_enter_key();
@@ -881,7 +923,7 @@ impl Keyboard {
         let mut word = typed.clone();
         if allow_correction && self.settings.auto_correct {
             if let Some(fix) = self.engines.auto_correction(self.mode, &typed) {
-                word = match_case(&fix, &typed, self.shift_on);
+                word = match_case(&fix, &typed, self.shift);
             }
         }
         editor.commit_text(&word);
@@ -908,7 +950,7 @@ impl Keyboard {
     }
 
     fn commit_candidate(&mut self, candidate: &str, editor: &mut dyn Editor, host: &mut dyn Host) {
-        let text = if self.mode.is_latin() { match_case(candidate, &self.composing, self.shift_on) } else { candidate.to_string() };
+        let text = if self.mode.is_latin() { match_case(candidate, &self.composing, self.shift) } else { candidate.to_string() };
         editor.commit_text(&text);
         self.clear_composing(host);
         if self.settings.auto_space && self.mode.is_latin() {
@@ -952,7 +994,7 @@ impl Keyboard {
 
     fn shown(&self, candidate: &str) -> String {
         if self.mode.is_latin() {
-            match_case(candidate, &self.composing, self.shift_on)
+            match_case(candidate, &self.composing, self.shift)
         } else {
             candidate.to_string()
         }
@@ -1681,7 +1723,10 @@ impl Keyboard {
                 (self.sp(26.0), theme.accent_text)
             } else if function {
                 let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS);
-                (self.sp(if small { 15.0 } else { 20.0 }), if key.key == KEY_SHIFT && self.shift_on { theme.accent } else { theme.text })
+                (
+                    self.sp(if small { 15.0 } else { 20.0 }),
+                    if key.key == KEY_SHIFT && self.shift != Shift::Off { theme.accent } else { theme.text },
+                )
             } else {
                 (self.sp(21.0), theme.text)
             };
@@ -1880,17 +1925,60 @@ mod tests {
     }
 
     #[test]
-    fn shift_capitalises_and_backspace_edits_composition() {
+    fn shift_capitalises_one_letter_and_backspace_edits_composition() {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
         tap_key(&mut kb, KEY_SHIFT, &mut editor);
-        type_text(&mut kb, "h", &mut editor);
-        tap_key(&mut kb, KEY_SHIFT, &mut editor);
-        type_text(&mut kb, "ii", &mut editor);
+        type_text(&mut kb, "hii", &mut editor);
         tap_key(&mut kb, KEY_BACKSPACE, &mut editor);
         assert_eq!(editor.composing, "Hi");
         tap_key(&mut kb, KEY_ENTER, &mut editor);
         assert_eq!(editor.text, "Hi\n");
+    }
+
+    #[test]
+    fn double_tapping_shift_locks_capitals() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        tap_key(&mut kb, KEY_SHIFT, &mut editor);
+        tap_key(&mut kb, KEY_SHIFT, &mut editor);
+        assert_eq!(kb.shift, Shift::Locked);
+        type_text(&mut kb, "ok", &mut editor);
+        assert_eq!(editor.composing, "OK");
+        tap_key(&mut kb, KEY_SHIFT, &mut editor);
+        type_text(&mut kb, "a", &mut editor);
+        assert_eq!(editor.composing, "OKa");
+        assert_eq!(match_case("hello", "HE", Shift::Locked), "HELLO");
+    }
+
+    #[test]
+    fn enter_types_a_newline_in_terminals() {
+        let mut kb = keyboard();
+        // Termux: no input type and no action.
+        let mut editor = FakeEditor { info: Some((0x0200_0000, 0)), ..Default::default() };
+        type_text(&mut kb, "ls", &mut editor);
+        tap_key(&mut kb, KEY_ENTER, &mut editor);
+        assert_eq!(editor.text, "ls\n");
+        assert!(editor.actions.is_empty());
+    }
+
+    #[test]
+    fn japanese_long_vowel_key() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.engines.japanese(true);
+        kb.set_mode(Mode::Japanese, &mut editor, &mut host);
+        type_text(&mut kb, "ra", &mut editor);
+        tap_key(&mut kb, "ー", &mut editor);
+        type_text(&mut kb, "menn", &mut editor);
+        assert_eq!(kb.composing_preview(), "らーめん");
+        kb.refresh_candidates();
+        assert!(kb.candidates.iter().any(|c| c == "ラーメン"), "{:?}", kb.candidates);
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        tap_key(&mut kb, "ー", &mut editor);
+        tap_key(&mut kb, ",", &mut editor);
+        assert!(editor.text.ends_with("ー、"), "{}", editor.text);
     }
 
     #[test]

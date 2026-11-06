@@ -558,12 +558,9 @@ impl Editor for AndroidEditor {
 
     fn send_enter_key(&mut self) {
         const KEYCODE_ENTER: i32 = 66;
-        for action in [0, 1] {
-            if let Ok(event) = self.env.new_object("android/view/KeyEvent", "(II)V", &[Value::Int(action), Value::Int(KEYCODE_ENTER)]) {
-                let event = Local::new(self.env, event);
-                self.call("sendKeyEvent", "(Landroid/view/KeyEvent;)Z", &[Value::Obj(event.obj)]);
-            }
-        }
+        // The framework's helper stamps the events with the time and marks them as from a soft
+        // keyboard, which some apps check.
+        let _ = self.env.call(self.service, "sendDownUpKeyEvents", "(I)V", &[Value::Int(KEYCODE_ENTER)]);
     }
 }
 

@@ -93,6 +93,11 @@ fn pinyin_ranks_common_characters_first() {
     assert_first("的", pinyin.candidates("de", ScriptMode::Simplified));
     assert_first("謝謝", pinyin.candidates("xiexie", ScriptMode::Traditional));
     assert_first("不知道", pinyin.candidates("bzd", ScriptMode::Simplified));
+    // Variants that CC-CEDICT lists as Traditional only are offered in Simplified too.
+    assert!(pinyin.candidates("ni", ScriptMode::Simplified)[..3].contains(&"妳".to_string()));
+    assert_contains("妳们", pinyin.candidates("nimen", ScriptMode::Simplified));
+    assert_contains("牠", pinyin.candidates("ta", ScriptMode::Simplified));
+    assert_first("你的", pinyin.candidates("nide", ScriptMode::Simplified));
 }
 
 #[test]

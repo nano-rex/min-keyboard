@@ -344,6 +344,50 @@ fn build_chinese(args: &Args) {
         let top = simplified.first().and_then(|w| scores.get(w)).copied().unwrap_or(0.0) as u64;
         lines.push(format!("{}\t{}\t{}\t{top}", parts[0], simplified.join("|"), traditional.join("|")));
     }
+    add_variants(&mut lines);
+    write_lines("pinyin_lexicon.tsv", &lines);
+}
+
+/// Words written with characters that CC-CEDICT files as Traditional forms only, though they are
+/// also used in Simplified text: (pinyin, (word, the word it follows) in Simplified and in Traditional).
+type Variant = (&'static str, (&'static str, &'static str), (&'static str, &'static str));
+const VARIANTS: &[Variant] = &[
+    ("ni", ("妳", "呢"), ("妳", "呢")),
+    ("nimen", ("妳们", "你们"), ("妳們", "你們")),
+    ("nihao", ("妳好", "你好"), ("妳好", "你好")),
+    ("ta", ("牠", "它"), ("牠", "它")),
+    ("tamen", ("牠们", "它们"), ("牠們", "它們")),
+];
+
+/// Adds [`VARIANTS`] to the lexicon lines (`pinyin<TAB>simplified<TAB>traditional[<TAB>frequency]`).
+/// Only existing keys are extended: a new key would stop the input from being segmented ("nide"
+/// would no longer give 你的).
+fn add_variants(lines: &mut [String]) {
+    fn insert(column: &str, word: &str, after: &str) -> String {
+        let mut words: Vec<&str> = column.split('|').filter(|w| !w.is_empty()).collect();
+        if !words.contains(&word) {
+            let at = words.iter().position(|w| *w == after).map_or(words.len(), |i| i + 1);
+            words.insert(at, word);
+        }
+        words.join("|")
+    }
+    for &(key, (simplified, after_simplified), (traditional, after_traditional)) in VARIANTS {
+        let Some(line) = lines.iter_mut().find(|line| line.split('\t').next() == Some(key)) else { continue };
+        let mut columns: Vec<String> = line.split('\t').map(str::to_string).collect();
+        if columns.len() < 3 {
+            continue;
+        }
+        columns[1] = insert(&columns[1], simplified, after_simplified);
+        columns[2] = insert(&columns[2], traditional, after_traditional);
+        *line = columns.join("\t");
+    }
+}
+
+/// Adds the [`VARIANTS`] to the shipped lexicon without rebuilding it.
+fn build_pinyin_variants() {
+    let text = read_text(&assets_dir().join("pinyin_lexicon.tsv"));
+    let mut lines: Vec<String> = split_lines(&text).into_iter().map(str::to_string).collect();
+    add_variants(&mut lines);
     write_lines("pinyin_lexicon.tsv", &lines);
 }
 
@@ -635,6 +679,7 @@ Commands:
   english         --frequency en_full.txt --spelling words.txt [--limit 80000] [--extra 20000] [--slang-threshold 20000]
   malay           --frequency ms_full.txt [--minimum 3] [--limit 60000]
   pinyin-sources  [--cedict cedict.txt[.gz]] [--fcitx-simplified zhwiki.dict.yaml] [--opencc-characters F] [--opencc-phrases F]
+  pinyin-variants (adds a few variant characters to assets/pinyin_lexicon.tsv; `chinese` does this too)
   chinese         --jieba dict.txt --frequency zh_cn_full.txt --opencc-characters TSCharacters.txt --opencc-phrases TSPhrases.txt
   japanese        --skk SKK-JISYO.L --frequency ja_full.txt [--max-reading 12] [--per-reading 16] [--kana-minimum 20]
   korean          --frequency ko_full.txt [--minimum 5] [--limit 80000] [--per-key 8]
@@ -655,6 +700,7 @@ fn main() {
         "pinyin-sources" => {
             build_pinyin_sources(&Args::parse(rest, &["cedict", "fcitx-simplified", "opencc-characters", "opencc-phrases"]))
         }
+        "pinyin-variants" => build_pinyin_variants(),
         "chinese" => build_chinese(&Args::parse(rest, &["jieba", "frequency", "opencc-characters", "opencc-phrases"])),
         "japanese" => build_japanese(&Args::parse(rest, &["skk", "frequency", "max-reading", "per-reading", "kana-minimum"])),
         "korean" => build_korean(&Args::parse(rest, &["frequency", "minimum", "limit", "per-key"])),
@@ -693,6 +739,14 @@ mod tests {
         assert_eq!(parse_cedict("綠色  绿色 [lu:4 se4] /green/"), Some(("綠色", "绿色", "lu:4 se4")));
         assert_eq!(parse_cedict("# comment"), None);
         assert_eq!(parse_cedict("a b [] /x/"), None);
+    }
+
+    #[test]
+    fn variants_follow_their_anchor_once() {
+        let mut lines = vec!["ni\t你|呢|泥\t你|呢|妳|泥\t3".to_string(), "nimen\t你们\t你們".to_string()];
+        add_variants(&mut lines);
+        add_variants(&mut lines);
+        assert_eq!(lines, ["ni\t你|呢|妳|泥\t你|呢|妳|泥\t3", "nimen\t你们|妳们\t你們|妳們"]);
     }
 
     #[test]

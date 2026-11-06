@@ -16,12 +16,13 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
 | English | Completions ranked by frequency, typo correction (`teh` → the, `recieve` → receive), contractions (`dont` → don't), shortcuts (`wdym`) | ~74,000 words |
 | Malay | Completions and typo correction (`bagaimna` → bagaimana) | ~50,000 words |
 | Chinese (简/繁) | Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
-| Japanese | Romaji → hiragana/katakana with kanji conversion (`nihon` → 日本, `watashi` → 私) | 131,000 readings (SKK) |
+| Japanese | Romaji → hiragana/katakana with kanji conversion (`nihon` → 日本, `watashi` → 私), a ー key for long vowels (`ra`ー`men` → ラーメン) | 131,000 readings (SKK) |
 | Korean | Romanization → Hangul words (`gamsahamnida` → 감사합니다) with syllable-by-syllable fallback | 97,000 keys |
 
 - **Look and feel.** Rounded keys with depth, light, dark or system theme, key previews, haptic
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
   name on the space bar.
+- Shift capitalises the next letter only; tap it twice to lock capitals (⇪).
 - Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
 - **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some
   text and tap **✓ Check grammar** above the keys; the keyboard shows the changes and replaces

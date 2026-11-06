@@ -44,7 +44,10 @@ $D japanese --skk SKK-JISYO.L --frequency ja_full.txt
 $D korean --frequency ko_full.txt
 ```
 
-`pinyin-sources` writes an unranked lexicon, so run `chinese` after it. The tool uses
+`pinyin-sources` writes an unranked lexicon, so run `chinese` after it. `chinese` also adds a
+few characters that CC-CEDICT lists as Traditional only but that Simplified text uses too, such
+as 妳 (you, to a woman) and 牠 (it, for animals); the list is `VARIANTS` in the tool, and
+`dicttool pinyin-variants` adds it to the shipped lexicon without the other sources. The tool uses
 `gzip` for `.gz` files and `iconv` to read the EUC-JIS-2004 SKK dictionary (a UTF-8
 copy is read directly).
 

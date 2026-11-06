@@ -22,7 +22,7 @@ use sign::{KeySource, Signer};
 
 const MIN_SDK: u32 = 26;
 const TARGET_SDK: u32 = 34;
-const VERSION_CODE: u32 = 3;
+const VERSION_CODE: u32 = 4;
 const LIBRARY: &str = "minkeyboard";
 /// Android 15 devices can use 16 KiB pages; libraries must be aligned for them.
 const PAGE_SIZE: usize = 16384;
