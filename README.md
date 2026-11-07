@@ -25,7 +25,8 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
 - Shift capitalises the next letter only; tap it twice to lock capitals (⇪).
 - **Pronunciation of selected text.** Select Chinese, Japanese or Korean text and the bar above the keys shows its pinyin (with tone marks), romaji or romanization; tap it to see it all, or to type it in place of the selection.
 - Symbol pages, an expandable suggestion panel and auto-space.
-- **Settings** has a page for languages and keyboards, where each keyboard is turned on or off and auto-correct (English, Malay) and the normal space (Chinese, Japanese) are set per language, and a page for the AI grammar check.
+- **Accessibility:** keyboard size (small to extra large, keys and text), larger or stronger-coloured sounds under the Bopomofo, kana and Hangul keys (or none), bold key letters, high contrast, and a shorter or longer long-press delay.
+- **Settings** has pages for accessibility, for languages and keyboards, where each keyboard is turned on or off and auto-correct (English, Malay) and the normal space (Chinese, Japanese) are set per language, and a page for the AI grammar check.
 - Space types the full-width 　 in Chinese and Japanese; a setting switches it to a normal space.
 - **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some
   text and tap **✓ Check grammar** above the keys; the keyboard shows the changes and replaces

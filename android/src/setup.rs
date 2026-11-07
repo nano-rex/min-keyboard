@@ -15,6 +15,9 @@ const THEME_GROUP: i64 = 102;
 const OPEN_LANGUAGES: i64 = 103;
 const OPEN_AI: i64 = 104;
 const BACK: i64 = 105;
+const OPEN_ACCESSIBILITY: i64 = 106;
+/// Radio groups use `CHOICE_BASE + index` into [`CHOICES`].
+const CHOICE_BASE: i64 = 300;
 /// Switches use `SWITCH_BASE + index` into [`switches`].
 const SWITCH_BASE: i64 = 200;
 
@@ -28,17 +31,28 @@ pub fn with_activity<R>(f: impl FnOnce(jobject) -> R) -> Option<R> {
 }
 
 /// The buttons of this module: (view id, callback id).
-const BUTTONS: [(&str, i64); 6] = [
+const BUTTONS: [(&str, i64); 8] = [
     ("open_input_settings", OPEN_INPUT_SETTINGS),
     ("open_input_picker", OPEN_INPUT_PICKER),
     ("open_languages", OPEN_LANGUAGES),
     ("open_ai", OPEN_AI),
     ("back_from_languages", BACK),
     ("back_from_ai", BACK),
+    ("open_accessibility", OPEN_ACCESSIBILITY),
+    ("back_from_accessibility", BACK),
 ];
 
+/// Settings chosen with radio buttons: (preference key, option names, default option). The group's
+/// view is `<key>_group` and each button's is `<key>_<option>`.
+fn choices() -> [(&'static str, Vec<&'static str>, &'static str); 2] {
+    [
+        (prefs::KEY_KEYBOARD_SIZE, prefs::KEYBOARD_SIZES.iter().map(|(name, _)| *name).collect(), "medium"),
+        (prefs::KEY_LONG_PRESS, prefs::LONG_PRESS_DELAYS.iter().map(|(name, _)| *name).collect(), "normal"),
+    ]
+}
+
 /// The pages of the screen, by the id of their container.
-const PAGES: [&str; 3] = ["page_main", "page_languages", "page_ai"];
+const PAGES: [&str; 4] = ["page_main", "page_languages", "page_ai", "page_accessibility"];
 /// The page shown, as an index into [`PAGES`]; kept when the activity is recreated.
 static PAGE: AtomicU8 = AtomicU8::new(0);
 
@@ -109,6 +123,19 @@ fn bind(env: Env, activity: jobject) -> JResult<()> {
         &[Value::Obj(listener.obj)],
     )?;
 
+    for (index, (key, options, default)) in choices().into_iter().enumerate() {
+        let group = find_view(env, activity, &format!("{key}_group"))?;
+        let value = prefs::get_string(env, activity, key).filter(|v| options.contains(&v.as_str()));
+        let button = format!("{key}_{}", value.as_deref().unwrap_or(default));
+        env.call(group.obj, "check", "(I)V", &[Value::Int(resource_id(env, activity, &button, "id")?)])?;
+        let listener = callback(env, CHOICE_BASE + index as i64)?;
+        env.call(
+            group.obj,
+            "setOnCheckedChangeListener",
+            "(Landroid/widget/RadioGroup$OnCheckedChangeListener;)V",
+            &[Value::Obj(listener.obj)],
+        )?;
+    }
     for (index, (key, default)) in switches().iter().enumerate() {
         let switch = find_view(env, activity, &format!("{key}_toggle"))?;
         env.call(switch.obj, "setChecked", "(Z)V", &[Value::Bool(prefs::get_switch(env, activity, key, *default))])?;
@@ -184,10 +211,11 @@ pub fn on_click(env: Env, id: i64, view: jobject) {
                 let _ = env.call(manager.obj, "showInputMethodPicker", "()V", &[]);
             }
         }
-        OPEN_LANGUAGES | OPEN_AI | BACK => {
+        OPEN_LANGUAGES | OPEN_AI | OPEN_ACCESSIBILITY | BACK => {
             let page = match id {
                 OPEN_LANGUAGES => 1,
                 OPEN_AI => 2,
+                OPEN_ACCESSIBILITY => 3,
                 _ => 0,
             };
             with_activity(|activity| show_page(env, activity, page));
@@ -204,10 +232,19 @@ pub fn on_switch(env: Env, id: i64, button: jobject, checked: bool) {
 }
 
 pub fn on_radio(env: Env, id: i64, group: jobject, checked_id: jint) {
+    let Some(context) = context_of(env, group) else { return };
+    if let Some((key, options, _)) = usize::try_from(id - CHOICE_BASE).ok().and_then(|i| choices().into_iter().nth(i)) {
+        let checked = options
+            .into_iter()
+            .find(|option| resource_id(env, context.obj, &format!("{key}_{option}"), "id").is_ok_and(|r| r == checked_id));
+        if let Some(option) = checked {
+            prefs::set_string(env, context.obj, key, option);
+        }
+        return;
+    }
     if id != THEME_GROUP {
         return;
     }
-    let Some(context) = context_of(env, group) else { return };
     let is = |name: &str| resource_id(env, context.obj, name, "id").map(|r| r == checked_id).unwrap_or(false);
     let theme = if is("theme_dark") {
         prefs::THEME_DARK
@@ -254,9 +291,12 @@ mod tests {
         let ids = layout_ids();
         let switches = switches().into_iter().map(|(key, _)| format!("{key}_toggle"));
         let buttons = BUTTONS.iter().chain(&setup_ai::BUTTONS).map(|(name, _)| name.to_string());
+        let choices = choices()
+            .into_iter()
+            .flat_map(|(key, options, _)| options.into_iter().map(move |option| format!("{key}_{option}")).chain([format!("{key}_group")]));
         let others = PAGES.iter().chain(&["settings_scroll", "theme_group", "theme_system", "theme_light", "theme_dark"]);
         let others = others.chain(&["device_report", "ai_status", "ai_progress"]).map(|name| name.to_string());
-        for name in switches.chain(buttons).chain(others) {
+        for name in switches.chain(buttons).chain(choices).chain(others) {
             assert!(ids.contains(&name.as_str()), "{name} is not in activity_setup.xml");
         }
     }

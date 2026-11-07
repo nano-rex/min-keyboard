@@ -3,7 +3,7 @@ resolver = "2"
 members = ["engines", "grammar", "android", "tools/apkbuild", "tools/dicttool"]
 
 [workspace.package]
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 publish = false
 

@@ -224,6 +224,16 @@ pub struct Settings {
     pub normal_space_japanese: bool,
     /// Chinese starts in Traditional characters.
     pub chinese_traditional: bool,
+    /// Accessibility: how much bigger keys and their text are than the medium size.
+    pub size_scale: f32,
+    /// The sound of each Bopomofo, kana and Hangul key, shown under it; larger, or in a stronger colour.
+    pub key_sounds: bool,
+    pub large_key_sounds: bool,
+    pub strong_key_sounds: bool,
+    pub bold_key_labels: bool,
+    pub high_contrast: bool,
+    /// How long a key is held before its long-press character is typed.
+    pub long_press_ms: i64,
     /// Show how selected Chinese, Japanese or Korean text is pronounced.
     pub romanize_selection: bool,
     /// Enabled flags, indexed like [`MODES`].
@@ -244,6 +254,13 @@ impl Default for Settings {
             normal_space_chinese: false,
             normal_space_japanese: false,
             chinese_traditional: false,
+            size_scale: 1.0,
+            key_sounds: true,
+            large_key_sounds: false,
+            strong_key_sounds: false,
+            bold_key_labels: false,
+            high_contrast: false,
+            long_press_ms: LONG_PRESS_MS,
             romanize_selection: true,
             languages: MODES.map(Mode::on_by_default),
         }
@@ -708,7 +725,7 @@ const GRAMMAR_BUTTON: &str = "✓ Check grammar";
 
 const REPEAT_INITIAL_DELAY_MS: i64 = 350;
 const REPEAT_INTERVAL_MS: i64 = 60;
-const LONG_PRESS_MS: i64 = 350;
+pub const LONG_PRESS_MS: i64 = 350;
 
 // EditorInfo constants.
 const IME_MASK_ACTION: i32 = 0xff;
@@ -937,7 +954,7 @@ impl Keyboard {
         let script = if settings.chinese_traditional { ScriptMode::Traditional } else { ScriptMode::Simplified };
         let mut keyboard = Keyboard {
             engines,
-            theme: theme::of(settings.dark),
+            theme: theme::of(settings.dark, settings.high_contrast),
             settings,
             density,
             scaled_density,
@@ -998,6 +1015,24 @@ impl Keyboard {
         value * self.scaled_density
     }
 
+    /// Text on keys and suggestions, which follows the keyboard size setting.
+    fn key_sp(&self, value: f32) -> f32 {
+        self.sp(value) * self.settings.size_scale
+    }
+
+    /// The long-press digit in a key's corner: it grows with the keys, but less.
+    fn hint_size(&self) -> f32 {
+        self.sp(10.0) * self.settings.size_scale.min(1.15)
+    }
+
+    /// `size`, made smaller until `text` fits `width` (but not below 8sp).
+    fn size_to_fit(&self, canvas: &mut dyn Canvas, text: &str, mut size: f32, bold: bool, width: f32) -> f32 {
+        while size > self.sp(8.0) && canvas.measure(text, size, bold) > width {
+            size -= self.sp(0.5);
+        }
+        size
+    }
+
     pub fn mode(&self) -> Mode {
         self.mode
     }
@@ -1010,7 +1045,7 @@ impl Keyboard {
 
     /// Settings may have changed while the keyboard was hidden (theme, hints, languages).
     pub fn apply_settings(&mut self, settings: Settings) {
-        self.theme = theme::of(settings.dark);
+        self.theme = theme::of(settings.dark, settings.high_contrast);
         // The 简⇄繁 key's choice lasts until the setting itself changes.
         if settings.chinese_traditional != self.settings.chinese_traditional {
             self.script = if settings.chinese_traditional { ScriptMode::Traditional } else { ScriptMode::Simplified };
@@ -1081,11 +1116,12 @@ impl Keyboard {
     }
 
     fn keys_height(&self) -> f32 {
-        self.dp(match self.mode {
+        let rows = match self.mode {
             Mode::Japanese => 6.0 * 46.0,
             Mode::ChineseBopomofo => 5.0 * 48.0,
             _ => 4.0 * 58.0,
-        })
+        };
+        self.dp(rows) * self.settings.size_scale
     }
 
     fn row_height(&self) -> f32 {
@@ -1550,7 +1586,7 @@ impl Keyboard {
             .iter()
             .enumerate()
             .map(|(i, candidate)| {
-                let width = (canvas.measure(&self.shown(candidate), self.sp(17.0), i == 0) + self.dp(24.0)).max(self.dp(44.0));
+                let width = (canvas.measure(&self.shown(candidate), self.key_sp(17.0), i == 0) + self.dp(24.0)).max(self.dp(44.0));
                 let rect = Rect::new(x + self.dp(2.0), top, x + self.dp(2.0) + width, top + self.dp(36.0));
                 x += width + self.dp(4.0);
                 rect
@@ -1732,7 +1768,7 @@ impl Keyboard {
                             host.schedule_timer(REPEAT_INITIAL_DELAY_MS);
                         } else if hint.is_some() {
                             self.timer = Timer::LongPress(id);
-                            host.schedule_timer(LONG_PRESS_MS);
+                            host.schedule_timer(self.settings.long_press_ms);
                         } else {
                             self.stop_timer(host);
                         }
@@ -2236,7 +2272,7 @@ impl Keyboard {
                 canvas.round_rect(chip, self.dp(18.0), theme.candidate_highlight);
             }
             let text = self.shown(&self.candidates[i]);
-            self.centered_text(canvas, &text, chip, self.sp(17.0), theme.text, first);
+            self.centered_text(canvas, &text, chip, self.key_sp(17.0), theme.text, first);
         }
         canvas.unclip();
         if self.grammar_button_visible() {
@@ -2264,7 +2300,7 @@ impl Keyboard {
 
         if let Some((rect, label)) = &self.preview {
             self.key_background(canvas, *rect, theme.popup);
-            self.centered_text(canvas, label, *rect, self.sp(28.0), theme.text, false);
+            self.centered_text(canvas, label, *rect, self.key_sp(28.0), theme.text, self.settings.bold_key_labels);
         }
     }
 
@@ -2285,18 +2321,18 @@ impl Keyboard {
             };
             self.key_background(canvas, key.rect, fill);
             let (size, color) = if key.key == KEY_SPACE {
-                (self.sp(13.0), theme.text_muted)
+                (self.key_sp(13.0), theme.text_muted)
             } else if key.key == KEY_ENTER {
-                (self.sp(26.0), theme.accent_text)
+                (self.key_sp(26.0), theme.accent_text)
             } else if enter {
-                (self.sp(20.0), theme.accent_text)
+                (self.key_sp(20.0), theme.accent_text)
             } else if function {
                 let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA | KEY_SCRIPT);
                 let on = (key.key == KEY_SHIFT && self.shift != Shift::Off)
                     || (key.key == KEY_KATAKANA && self.katakana)
                     || (key.key == KEY_SCRIPT && self.script == ScriptMode::Traditional)
                     || modifier.is_some();
-                (self.sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
+                (self.key_sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
             } else if (self.kana_keys() || self.mode == Mode::ChineseBopomofo) && !self.symbols_mode {
                 // While ゛, ゜ or 小 is on, kana without that form are dimmed (they still type).
                 let unchanged = self.kana_modifier.is_some_and(|(m, _)| {
@@ -2306,36 +2342,44 @@ impl Keyboard {
                         _ => false,
                     }
                 });
-                (self.sp(18.0), if unchanged { theme.text_muted } else { theme.text })
+                (self.key_sp(18.0), if unchanged { theme.text_muted } else { theme.text })
             } else if self.native_keys() && !self.symbols_mode {
-                (self.sp(19.0), theme.text)
+                (self.key_sp(19.0), theme.text)
             } else {
-                (self.sp(21.0), theme.text)
+                (self.key_sp(21.0), theme.text)
             };
             let cap = Rect { bottom: key.rect.bottom - self.dp(1.5), ..key.rect };
             let label = self.label_for(key.key);
-            let sound = if self.native_keys() && !self.symbols_mode && !function { romanization(&label) } else { None };
-            // A function key's label shrinks to fit rather than being cut short (简⇄繁 on a narrow key).
-            let mut size = size;
-            while function && size > self.sp(10.0) && canvas.measure(&label, size, false) > cap.width() - self.dp(8.0) {
-                size -= self.sp(1.0);
-            }
-            let fitted = self.fit(canvas, &label, size, false, cap.width() - self.dp(4.0), false);
+            let show_sound = self.settings.key_sounds && self.native_keys() && !self.symbols_mode && !function;
+            let sound = if show_sound { romanization(&label) } else { None };
+            // Labels shrink to fit a narrow key rather than being cut short (简⇄繁, or large text).
+            let bold = self.settings.bold_key_labels && key.key != KEY_SPACE;
+            let size = self.size_to_fit(canvas, &label, size, bold, cap.width() - self.dp(if function { 8.0 } else { 4.0 }));
+            let fitted = self.fit(canvas, &label, size, bold, cap.width() - self.dp(4.0), false);
             match sound {
                 // The kana or jamo, with its sound in small letters underneath.
                 Some(sound) => {
-                    // Starts a little lower, leaving the corner for a long-press digit.
-                    let split = cap.top + cap.height() * 0.62;
-                    let top = if key.hint.is_some() { cap.top + self.dp(8.0) } else { cap.top + self.dp(2.0) };
-                    self.centered_text(canvas, &fitted, Rect { top, bottom: split + self.dp(2.0), ..cap }, size, color, false);
-                    let small = self.sp(if self.rows().len() > 4 { 9.0 } else { 10.0 });
+                    let large = self.settings.large_key_sounds;
+                    let split = cap.top + cap.height() * if large { 0.58 } else { 0.62 };
+                    // Below the long-press digit, if there is one, and no taller than the room left.
+                    let top = cap.top + if key.hint.is_some() { self.hint_size() + self.dp(5.0) } else { self.dp(2.0) };
+                    let size = size.min((split + self.dp(2.0) - top) * 0.9);
+                    self.centered_text(canvas, &fitted, Rect { top, bottom: split + self.dp(2.0), ..cap }, size, color, bold);
+                    let small = match (large, self.rows().len() > 4) {
+                        (false, true) => 9.0,
+                        (false, false) => 10.0,
+                        (true, true) => 12.0,
+                        (true, false) => 13.0,
+                    };
+                    let small = self.size_to_fit(canvas, sound, self.key_sp(small), large, cap.width() - self.dp(2.0));
+                    let color = if self.settings.strong_key_sounds { theme.accent } else { theme.text_muted };
                     let below = Rect { top: split - self.dp(2.0), bottom: cap.bottom - self.dp(2.0), ..cap };
-                    self.centered_text(canvas, sound, below, small, theme.text_muted, false);
+                    self.centered_text(canvas, sound, below, small, color, large);
                 }
-                None => self.centered_text(canvas, &fitted, cap, size, color, false),
+                None => self.centered_text(canvas, &fitted, cap, size, color, bold),
             }
             if let Some(hint) = key.hint {
-                let size = self.sp(10.0);
+                let size = self.hint_size();
                 let style = TextStyle { size, color: theme.text_muted, bold: false, align: Align::Right };
                 canvas.text(hint, key.rect.right - self.dp(6.0), key.rect.top + size + self.dp(4.0), style);
             }
@@ -2735,6 +2779,24 @@ mod tests {
         kb.set_mode(Mode::Japanese, &mut editor, &mut host);
         tap_key(&mut kb, KEY_SPACE, &mut editor);
         assert_eq!(editor.text, "\u{3000} \u{3000}");
+    }
+
+    #[test]
+    fn accessibility_settings() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        let (height, key) = (kb.height(), kb.keys[0].rect.height());
+        kb.apply_settings(Settings { size_scale: 1.3, long_press_ms: 600, ..Settings::default() });
+        assert!((kb.height() - height - kb.keys_height() / 1.3 * 0.3).abs() < 0.5, "only the keys grow");
+        assert!((kb.keys[0].rect.height() / key) > 1.3, "the keys are taller");
+        assert!((kb.key_sp(10.0) - kb.sp(13.0)).abs() < 0.01, "and their text bigger");
+        let q = kb.keys.iter().find(|k| k.key == "q").unwrap().rect;
+        kb.on_touch(Touch::Down { id: 0, x: q.center_x(), y: q.center_y() }, &mut editor, &mut host, &mut FakeCanvas);
+        assert_eq!(host.timers, vec![600], "the long-press delay");
+        // High contrast picks its own colours.
+        kb.apply_settings(Settings { high_contrast: true, ..Settings::default() });
+        assert_eq!(kb.theme.text, theme::LIGHT_HIGH_CONTRAST.text);
     }
 
     #[test]

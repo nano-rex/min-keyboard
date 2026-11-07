@@ -1,4 +1,4 @@
-//! Colours for the light and dark keyboard, as ARGB.
+//! Colours for the light and dark keyboard, and their high-contrast versions, as ARGB.
 
 pub struct Theme {
     pub background: u32,
@@ -56,10 +56,46 @@ pub const LIGHT: Theme = Theme {
     removed: rgb(0xC5221F),
 };
 
-pub fn of(dark: bool) -> &'static Theme {
-    if dark {
-        &DARK
-    } else {
-        &LIGHT
+/// Pure white or black text, and key edges that stand out, for low vision.
+pub const DARK_HIGH_CONTRAST: Theme = Theme {
+    background: rgb(0x000000),
+    key: rgb(0x2B2B2B),
+    key_pressed: rgb(0x5A5A5A),
+    function_key: rgb(0x111111),
+    function_key_pressed: rgb(0x3A3A3A),
+    key_shadow: rgb(0xBDBDBD),
+    text: rgb(0xFFFFFF),
+    text_muted: rgb(0xE0E0E0),
+    accent: rgb(0xAECBFA),
+    accent_text: rgb(0x000000),
+    candidate_highlight: rgb(0x1E3A66),
+    popup: rgb(0x3A3A3A),
+    added: rgb(0x9BE8AE),
+    removed: rgb(0xFFA49C),
+};
+
+pub const LIGHT_HIGH_CONTRAST: Theme = Theme {
+    background: rgb(0xC9CDD3),
+    key: rgb(0xFFFFFF),
+    key_pressed: rgb(0xBFC4CC),
+    function_key: rgb(0xA9AFB8),
+    function_key_pressed: rgb(0x8E959F),
+    key_shadow: rgb(0x202124),
+    text: rgb(0x000000),
+    text_muted: rgb(0x202124),
+    accent: rgb(0x0B57D0),
+    accent_text: rgb(0xFFFFFF),
+    candidate_highlight: rgb(0xC2D7FA),
+    popup: rgb(0xFFFFFF),
+    added: rgb(0x0D5223),
+    removed: rgb(0x9C1A16),
+};
+
+pub fn of(dark: bool, high_contrast: bool) -> &'static Theme {
+    match (dark, high_contrast) {
+        (true, false) => &DARK,
+        (false, false) => &LIGHT,
+        (true, true) => &DARK_HIGH_CONTRAST,
+        (false, true) => &LIGHT_HIGH_CONTRAST,
     }
 }

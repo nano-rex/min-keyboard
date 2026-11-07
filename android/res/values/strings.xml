@@ -16,6 +16,27 @@
     <string name="section_more">More settings</string>
     <string name="open_languages">Languages and keyboards  ›</string>
     <string name="open_ai">AI grammar check  ›</string>
+    <string name="open_accessibility">Accessibility  ›</string>
+    <string name="section_accessibility">Accessibility</string>
+    <string name="keyboard_size">Keyboard size</string>
+    <string name="keyboard_size_hint">Makes the keys taller and their letters, and the suggestions, bigger.</string>
+    <string name="size_small">Small</string>
+    <string name="size_medium">Medium</string>
+    <string name="size_large">Large</string>
+    <string name="size_extra_large">Extra large</string>
+    <string name="key_sounds">Sounds under keys</string>
+    <string name="key_sounds_hint">The Bopomofo, kana and Hangul keys show how each one sounds (ㄅ b, か ka, ㄱ g).</string>
+    <string name="show_key_sounds">Show the sound under each key</string>
+    <string name="large_key_sounds">Make the sounds larger and bold</string>
+    <string name="strong_key_sounds">Show the sounds in a stronger colour</string>
+    <string name="seeing_keys">Seeing the keys</string>
+    <string name="bold_key_labels">Bold letters on keys</string>
+    <string name="high_contrast">High contrast (black or white text, darker key edges)</string>
+    <string name="long_press_delay">Long-press delay</string>
+    <string name="long_press_delay_hint">How long to hold a key for its number or other long-press character.</string>
+    <string name="delay_short">Short</string>
+    <string name="delay_normal">Normal</string>
+    <string name="delay_long">Long</string>
     <string name="back">‹  Back</string>
     <string name="languages_intro">Turn on the keyboards you want. The language key at the top left of the keyboard switches between them.</string>
 

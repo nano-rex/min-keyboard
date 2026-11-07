@@ -14,7 +14,7 @@ pub const THEME_DARK: &str = "dark";
 
 /// The on/off settings shown as switches, besides the keyboards: (preference key, default).
 /// Each switch's view is named after its key: `auto_space_toggle`.
-pub const SWITCHES: [(&str, bool); 11] = [
+pub const SWITCHES: [(&str, bool); 16] = [
     ("key_vibration", true),
     ("key_popup", true),
     ("number_row_hints", true),
@@ -27,7 +27,20 @@ pub const SWITCHES: [(&str, bool); 11] = [
     ("normal_space_chinese", false),
     ("normal_space_japanese", false),
     ("chinese_traditional", false),
+    ("show_key_sounds", true),
+    ("large_key_sounds", false),
+    ("strong_key_sounds", false),
+    ("bold_key_labels", false),
+    ("high_contrast", false),
 ];
+
+/// Settings chosen from a few options with radio buttons, stored as the option's name.
+pub const KEY_KEYBOARD_SIZE: &str = "keyboard_size";
+pub const KEY_LONG_PRESS: &str = "long_press_delay";
+/// Keyboard sizes and how much they scale the keys and their text.
+pub const KEYBOARD_SIZES: [(&str, f32); 4] = [("small", 0.85), ("medium", 1.0), ("large", 1.15), ("extra_large", 1.3)];
+/// Long-press delays in milliseconds.
+pub const LONG_PRESS_DELAYS: [(&str, i64); 3] = [("short", 250), ("normal", crate::keyboard::LONG_PRESS_MS), ("long", 600)];
 
 /// Settings that replaced an older, shared one start from its value: (new key, old key).
 const REPLACED: [(&str, &str); 6] = [
@@ -184,6 +197,9 @@ pub fn load(env: Env, context: jobject) -> Settings {
         let default = SWITCHES.iter().find(|(k, _)| *k == key).is_some_and(|(_, d)| *d);
         get_switch(env, context, key, default)
     };
+    fn pick<T: Copy>(value: Option<String>, options: &[(&str, T)], default: T) -> T {
+        value.and_then(|v| options.iter().find(|(name, _)| *name == v).map(|&(_, n)| n)).unwrap_or(default)
+    }
     let mut languages = [true; MODES.len()];
     for (enabled, mode) in languages.iter_mut().zip(MODES) {
         *enabled = get_switch(env, context, &keyboard_key(mode), mode.on_by_default());
@@ -201,6 +217,13 @@ pub fn load(env: Env, context: jobject) -> Settings {
         normal_space_chinese: switch("normal_space_chinese"),
         normal_space_japanese: switch("normal_space_japanese"),
         chinese_traditional: switch("chinese_traditional"),
+        key_sounds: switch("show_key_sounds"),
+        large_key_sounds: switch("large_key_sounds"),
+        strong_key_sounds: switch("strong_key_sounds"),
+        bold_key_labels: switch("bold_key_labels"),
+        high_contrast: switch("high_contrast"),
+        size_scale: pick(get_string(env, context, KEY_KEYBOARD_SIZE), &KEYBOARD_SIZES, 1.0),
+        long_press_ms: pick(get_string(env, context, KEY_LONG_PRESS), &LONG_PRESS_DELAYS, crate::keyboard::LONG_PRESS_MS),
         languages,
     }
 }

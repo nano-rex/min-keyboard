@@ -46,6 +46,7 @@
             <TextView style="@style/SectionTitle" android:text="@string/section_more" />
             <Button android:id="@+id/open_languages" style="@style/Widget.MinKeyboard.PageButton" android:text="@string/open_languages" />
             <Button android:id="@+id/open_ai" style="@style/Widget.MinKeyboard.PageButton" android:text="@string/open_ai" />
+            <Button android:id="@+id/open_accessibility" style="@style/Widget.MinKeyboard.PageButton" android:text="@string/open_accessibility" />
 
             <!-- Appearance -->
             <TextView style="@style/SectionTitle" android:text="@string/section_appearance" />
@@ -111,6 +112,53 @@
             <TextView style="@style/SectionTitle" android:text="@string/language_korean" />
             <Switch android:id="@+id/language_korean_toggle" style="@style/SettingSwitch" android:text="@string/keyboard_hangul" />
             <Switch android:id="@+id/language_korean_romaji_toggle" style="@style/SettingSwitch" android:text="@string/keyboard_romanized" />
+        </LinearLayout>
+
+        <!-- Accessibility -->
+        <LinearLayout
+            android:id="@+id/page_accessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <Button android:id="@+id/back_from_accessibility" style="@style/Widget.MinKeyboard.BackButton" android:text="@string/back" />
+            <TextView style="@style/PageTitle" android:text="@string/section_accessibility" />
+
+            <TextView style="@style/SectionTitle" android:text="@string/keyboard_size" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:alpha="0.75" android:text="@string/keyboard_size_hint" android:textSize="14sp" />
+            <RadioGroup
+                android:id="@+id/keyboard_size_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <RadioButton android:id="@+id/keyboard_size_small" style="@style/SettingChoice" android:text="@string/size_small" />
+                <RadioButton android:id="@+id/keyboard_size_medium" style="@style/SettingChoice" android:text="@string/size_medium" />
+                <RadioButton android:id="@+id/keyboard_size_large" style="@style/SettingChoice" android:text="@string/size_large" />
+                <RadioButton android:id="@+id/keyboard_size_extra_large" style="@style/SettingChoice" android:text="@string/size_extra_large" />
+            </RadioGroup>
+
+            <TextView style="@style/SectionTitle" android:text="@string/key_sounds" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:alpha="0.75" android:text="@string/key_sounds_hint" android:textSize="14sp" />
+            <Switch android:id="@+id/show_key_sounds_toggle" style="@style/SettingSwitch" android:text="@string/show_key_sounds" />
+            <Switch android:id="@+id/large_key_sounds_toggle" style="@style/SettingSwitch" android:text="@string/large_key_sounds" />
+            <Switch android:id="@+id/strong_key_sounds_toggle" style="@style/SettingSwitch" android:text="@string/strong_key_sounds" />
+
+            <TextView style="@style/SectionTitle" android:text="@string/seeing_keys" />
+            <Switch android:id="@+id/bold_key_labels_toggle" style="@style/SettingSwitch" android:text="@string/bold_key_labels" />
+            <Switch android:id="@+id/high_contrast_toggle" style="@style/SettingSwitch" android:text="@string/high_contrast" />
+
+            <TextView style="@style/SectionTitle" android:text="@string/long_press_delay" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:alpha="0.75" android:text="@string/long_press_delay_hint" android:textSize="14sp" />
+            <RadioGroup
+                android:id="@+id/long_press_delay_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <RadioButton android:id="@+id/long_press_delay_short" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:minHeight="48dp" android:text="@string/delay_short" />
+                <RadioButton android:id="@+id/long_press_delay_normal" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:minHeight="48dp" android:text="@string/delay_normal" />
+                <RadioButton android:id="@+id/long_press_delay_long" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:minHeight="48dp" android:text="@string/delay_long" />
+            </RadioGroup>
         </LinearLayout>
 
         <!-- AI grammar check -->
