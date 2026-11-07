@@ -303,6 +303,9 @@ impl OpenCc {
     }
 }
 
+/// Candidates kept per pinyin key, most frequent first.
+const MAX_PER_KEY: usize = 96;
+
 fn build_chinese(args: &Args) {
     let mut scores: HashMap<String, f64> = HashMap::new();
     let mut raise = |word: &str, score: f64| {
@@ -338,8 +341,11 @@ fn build_chinese(args: &Args) {
         if parts.len() < 3 {
             continue;
         }
-        let simplified = rank(parts[1].split('|').filter(|v| !v.is_empty()).collect(), false);
-        let traditional = rank(parts[2].split('|').filter(|v| !v.is_empty()).collect(), true);
+        // Rare words are dropped only now that the list is ranked.
+        let mut simplified = rank(parts[1].split('|').filter(|v| !v.is_empty()).collect(), false);
+        let mut traditional = rank(parts[2].split('|').filter(|v| !v.is_empty()).collect(), true);
+        simplified.truncate(MAX_PER_KEY);
+        traditional.truncate(MAX_PER_KEY);
         // The fourth column is the top candidate's frequency, used to segment whole sentences.
         let top = simplified.first().and_then(|w| scores.get(w)).copied().unwrap_or(0.0) as u64;
         lines.push(format!("{}\t{}\t{}\t{top}", parts[0], simplified.join("|"), traditional.join("|")));
@@ -407,9 +413,9 @@ fn parse_cedict(line: &str) -> Option<(&str, &str, &str)> {
     (!pinyin.is_empty() && rest[1 + pinyin.len()..].starts_with(']')).then_some((traditional, simplified, pinyin))
 }
 
-/// Merges CC-CEDICT and a Fcitx dictionary into the pinyin lexicon (unranked; run `chinese` next).
+/// Merges CC-CEDICT and a Fcitx dictionary into the pinyin lexicon (unranked, and with every
+/// candidate; run `chinese` next to rank them and keep the most frequent).
 fn build_pinyin_sources(args: &Args) {
-    const MAX_PER_KEY: usize = 96;
     const MAX_FCITX_WORDS: usize = 100_000;
 
     #[derive(Default)]
@@ -485,9 +491,10 @@ fn build_pinyin_sources(args: &Args) {
             }
         }
     }
+    // Nothing is dropped here: cutting an unranked list would lose common characters such as 西
+    // and 间, which sort late.
     let longest_first = |values: &mut Vec<String>| {
         values.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then_with(|| a.cmp(b)));
-        values.truncate(MAX_PER_KEY);
         values.join("|")
     };
     let lines: Vec<String> = buckets
@@ -495,6 +502,136 @@ fn build_pinyin_sources(args: &Args) {
         .map(|(key, bucket)| format!("{key}\t{}\t{}", longest_first(&mut bucket.simplified), longest_first(&mut bucket.traditional)))
         .collect();
     write_lines("pinyin_lexicon.tsv", &lines);
+}
+
+/// Writes `pinyin_readings.tsv`: each word in the pinyin lexicon (both scripts) and its pinyin
+/// with tone marks from CC-CEDICT, for showing the pronunciation of selected text. A single
+/// character with several readings gets the one it has in most CC-CEDICT words (说 is shuō, as
+/// in 说话 and 小说); a longer word gets the reading under which the lexicon ranks it highest.
+/// Grammar particles, which words rarely contain, are set by hand.
+fn build_pinyin_readings(args: &Args) {
+    // Where each word ranks under each toneless key: (key, word) -> position.
+    let mut rank: HashMap<(String, String), usize> = HashMap::new();
+    for line in split_lines(&read_text(&assets_dir().join("pinyin_lexicon.tsv"))) {
+        let columns: Vec<&str> = line.split('\t').collect();
+        if columns.len() < 3 {
+            continue;
+        }
+        for column in &columns[1..3] {
+            for (i, word) in column.split('|').enumerate() {
+                rank.entry((columns[0].to_string(), word.to_string())).or_insert(i);
+            }
+        }
+    }
+    let path = args.path("cedict");
+    let text = if path.extension().is_some_and(|e| e == "gz") { decode_with("gzip", &["-dc"], &path) } else { read_text(&path) };
+    // How often each character is read each way inside longer words.
+    let mut uses: HashMap<(char, String), usize> = HashMap::new();
+    for line in split_lines(&text) {
+        let Some((traditional, simplified, pinyin)) = parse_cedict(line) else { continue };
+        let syllables: Vec<&str> = pinyin.split_whitespace().collect();
+        for word in [simplified, traditional] {
+            let chars: Vec<char> = word.chars().collect();
+            if chars.len() < 2 || chars.len() != syllables.len() || (word == traditional && traditional == simplified) {
+                continue;
+            }
+            for (c, syllable) in chars.iter().zip(&syllables) {
+                if let Some(reading) = tone_marks(syllable) {
+                    *uses.entry((*c, reading)).or_default() += 1;
+                }
+            }
+        }
+    }
+    // word -> (lexicon rank or, for a character, minus its uses; is a proper noun; reading)
+    let mut best: BTreeMap<String, (i64, bool, String)> = BTreeMap::new();
+    for line in split_lines(&text) {
+        let Some((traditional, simplified, pinyin)) = parse_cedict(line) else { continue };
+        let key: String = pinyin.to_lowercase().replace("u:", "v").chars().filter(|c| c.is_ascii_lowercase()).collect();
+        let Some(reading) = tone_marks(pinyin) else { continue };
+        let proper = pinyin.starts_with(|c: char| c.is_ascii_uppercase());
+        for word in [simplified, traditional] {
+            let Some(&position) = rank.get(&(key.clone(), word.to_string())) else { continue };
+            let mut chars = word.chars();
+            let order = match (chars.next(), chars.next()) {
+                (Some(c), None) => -(uses.get(&(c, reading.clone())).copied().unwrap_or(0) as i64),
+                _ => position as i64,
+            };
+            let candidate = (order, proper, reading.clone());
+            match best.get(word) {
+                Some(current) if (current.0, current.1) <= (candidate.0, candidate.1) => {}
+                _ => _ = best.insert(word.to_string(), candidate),
+            }
+        }
+    }
+    // Particles, and characters whose everyday reading is rare inside longer words.
+    let set_by_hand = [
+        ("了", "le"),
+        ("的", "de"),
+        ("着", "zhe"),
+        ("著", "zhe"),
+        ("得", "de"),
+        ("吗", "ma"),
+        ("嗎", "ma"),
+        ("呢", "ne"),
+        ("吧", "ba"),
+        ("么", "me"),
+        ("麼", "me"),
+        ("还", "hái"),
+        ("還", "hái"),
+        ("都", "dōu"),
+        ("更", "gèng"),
+        ("角", "jiǎo"),
+        ("解", "jiě"),
+        ("将", "jiāng"),
+        ("將", "jiāng"),
+    ];
+    for (word, reading) in set_by_hand {
+        best.insert(word.to_string(), (0, false, reading.to_string()));
+    }
+    let lines: Vec<String> = best.into_iter().map(|(word, (_, _, reading))| format!("{word}\t{reading}")).collect();
+    write_lines("pinyin_readings.tsv", &lines);
+}
+
+/// "ni3 hao3" -> "nǐhǎo", "Xi1 an1" -> "xī'ān"; `None` for readings that are not plain pinyin.
+fn tone_marks(pinyin: &str) -> Option<String> {
+    let mut out = String::new();
+    for syllable in pinyin.split_whitespace() {
+        let syllable = syllable.to_lowercase().replace("u:", "ü");
+        let (letters, tone) = match syllable.char_indices().last()? {
+            (i, c @ '1'..='5') => (&syllable[..i], c as u32 - '0' as u32),
+            _ => return None,
+        };
+        if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_lowercase() || c == 'ü') {
+            return None;
+        }
+        // The mark goes on a or e, on the o of "ou", or else on the last vowel.
+        let vowels: Vec<(usize, char)> = letters.char_indices().filter(|(_, c)| "aeiouü".contains(*c)).collect();
+        let at = vowels
+            .iter()
+            .find(|(_, c)| *c == 'a' || *c == 'e')
+            .or_else(|| letters.find("ou").and_then(|i| vowels.iter().find(|(j, _)| *j == i)))
+            .or(vowels.last())
+            .map(|&(i, _)| i);
+        if !out.is_empty() && letters.starts_with(['a', 'e', 'o']) {
+            out.push('\''); // xī'ān, not xīān
+        }
+        for (i, c) in letters.char_indices() {
+            if Some(i) == at && (1..=4).contains(&tone) {
+                let marks = match c {
+                    'a' => "āáǎà",
+                    'e' => "ēéěè",
+                    'i' => "īíǐì",
+                    'o' => "ōóǒò",
+                    'u' => "ūúǔù",
+                    _ => "ǖǘǚǜ",
+                };
+                out.push(marks.chars().nth(tone as usize - 1)?);
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 // ---------------------------------------------------------------- Japanese ----
@@ -565,6 +702,93 @@ fn build_japanese(args: &Args) {
         })
         .collect();
     write_lines("japanese_lexicon.tsv", &lines);
+}
+
+/// Writes `japanese_readings.tsv`: words with kanji from the shipped lexicon and their kana
+/// reading, for showing the pronunciation of selected text. A word listed under several readings
+/// gets the one that lists it first; among those, the reading with more words, which is usually
+/// the everyday one (日本 is listed first under にほん, にっぽん and じっぽん).
+///
+/// With `--skk`, kanji written with a kana ending are added from SKK's okuri-ari entries, keyed
+/// by the kanji and the ending's first letter: `食b` is た (食べる), `行k` is い (行く).
+fn build_japanese_readings(args: &Args) {
+    let per_reading = args.number("per-reading", 4) as usize;
+    let mut best: BTreeMap<String, (usize, i64, i64, String)> = BTreeMap::new();
+    for line in split_lines(&read_text(&assets_dir().join("japanese_lexicon.tsv"))) {
+        let columns: Vec<&str> = line.split('\t').collect();
+        if columns.len() < 2 {
+            continue;
+        }
+        let score: i64 = columns.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let words = columns[1].split('|').filter(|w| !w.is_empty()).count() as i64;
+        for (position, word) in columns[1].split('|').filter(|w| !w.is_empty()).take(per_reading).enumerate() {
+            let has_kanji = word.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c) || c == '々');
+            if !has_kanji || word.chars().count() > 8 {
+                continue;
+            }
+            let candidate = (position, -words, -score, columns[0].to_string());
+            match best.get(word) {
+                Some(current) if (current.0, current.1, current.2) <= (candidate.0, candidate.1, candidate.2) => {}
+                _ => _ = best.insert(word.to_string(), candidate),
+            }
+        }
+    }
+    if let Some(path) = args.optional_path("skk") {
+        let raw = read_skk(&path);
+        let mut okuri_ari = false;
+        for line in split_lines(&raw) {
+            if line.starts_with(";; okuri-ari entries") {
+                okuri_ari = true;
+                continue;
+            }
+            if line.starts_with(";; okuri-nasi entries") {
+                break;
+            }
+            if !okuri_ari || line.starts_with(';') {
+                continue;
+            }
+            let Some((head, rest)) = line.split_once(" /") else { continue };
+            let Some(letter) = head.chars().last().filter(char::is_ascii_lowercase) else { continue };
+            let reading = &head[..head.len() - 1];
+            if !is_hiragana(reading) {
+                continue;
+            }
+            let words: Vec<&str> =
+                rest.split('/').map(|item| item.split(';').next().unwrap_or("").trim()).filter(|w| !w.is_empty()).collect();
+            // A reading that starts voiced (がk for 書く) is the form inside compounds; the plain
+            // one is preferred, then the reading with more words (いk over ゆk for 行く).
+            let voiced = reading.starts_with(|c: char| "がぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ".contains(c));
+            let count = words.len() as i64;
+            for (position, word) in words.iter().take(per_reading).enumerate() {
+                let all_kanji = word.chars().all(|c| ('\u{4e00}'..='\u{9fff}').contains(&c) || c == '々');
+                if !all_kanji || word.chars().count() > 3 {
+                    continue;
+                }
+                let candidate = (position, i64::from(voiced), -count, reading.to_string());
+                let key = format!("{word}{letter}");
+                match best.get(&key) {
+                    Some(current) if (current.0, current.1, current.2) <= (candidate.0, candidate.1, candidate.2) => {}
+                    _ => _ = best.insert(key, candidate),
+                }
+            }
+        }
+    }
+    // Everyday readings that the dictionary lists after a formal one.
+    let set_by_hand = [
+        ("日本語", "にほんご"),
+        ("昨日", "きのう"),
+        ("一日", "いちにち"),
+        ("今年", "ことし"),
+        ("一人", "ひとり"),
+        ("二人", "ふたり"),
+        ("行t", "い"),
+        ("入r", "はい"),
+    ];
+    for (word, reading) in set_by_hand {
+        best.insert(word.to_string(), (0, 0, 0, reading.to_string()));
+    }
+    let lines: Vec<String> = best.into_iter().map(|(word, (_, _, _, reading))| format!("{word}\t{reading}")).collect();
+    write_lines("japanese_readings.tsv", &lines);
 }
 
 // ------------------------------------------------------------------ Korean ----
@@ -681,6 +905,8 @@ Commands:
   pinyin-sources  [--cedict cedict.txt[.gz]] [--fcitx-simplified zhwiki.dict.yaml] [--opencc-characters F] [--opencc-phrases F]
   pinyin-variants (adds a few variant characters to assets/pinyin_lexicon.tsv; `chinese` does this too)
   chinese         --jieba dict.txt --frequency zh_cn_full.txt --opencc-characters TSCharacters.txt --opencc-phrases TSPhrases.txt
+  pinyin-readings --cedict cedict.txt[.gz] (after `chinese`; pinyin with tone marks for selected text)
+  japanese-readings [--skk SKK-JISYO.L] [--per-reading 4] (after `japanese`; kana readings of kanji for selected text)
   japanese        --skk SKK-JISYO.L --frequency ja_full.txt [--max-reading 12] [--per-reading 16] [--kana-minimum 20]
   korean          --frequency ko_full.txt [--minimum 5] [--limit 80000] [--per-key 8]
 
@@ -701,6 +927,8 @@ fn main() {
             build_pinyin_sources(&Args::parse(rest, &["cedict", "fcitx-simplified", "opencc-characters", "opencc-phrases"]))
         }
         "pinyin-variants" => build_pinyin_variants(),
+        "pinyin-readings" => build_pinyin_readings(&Args::parse(rest, &["cedict"])),
+        "japanese-readings" => build_japanese_readings(&Args::parse(rest, &["skk", "per-reading"])),
         "chinese" => build_chinese(&Args::parse(rest, &["jieba", "frequency", "opencc-characters", "opencc-phrases"])),
         "japanese" => build_japanese(&Args::parse(rest, &["skk", "frequency", "max-reading", "per-reading", "kana-minimum"])),
         "korean" => build_korean(&Args::parse(rest, &["frequency", "minimum", "limit", "per-key"])),
@@ -747,6 +975,16 @@ mod tests {
         add_variants(&mut lines);
         add_variants(&mut lines);
         assert_eq!(lines, ["ni\t你|呢|妳|泥\t你|呢|妳|泥\t3", "nimen\t你们|妳们\t你們|妳們"]);
+    }
+
+    #[test]
+    fn pinyin_tone_marks() {
+        assert_eq!(tone_marks("ni3 hao3").as_deref(), Some("nǐhǎo"));
+        assert_eq!(tone_marks("Xi1 an1").as_deref(), Some("xī'ān"));
+        assert_eq!(tone_marks("lu:4 se4").as_deref(), Some("lǜsè"));
+        assert_eq!(tone_marks("gou3 xiong2").as_deref(), Some("gǒuxióng"));
+        assert_eq!(tone_marks("dui4 de5").as_deref(), Some("duìde"));
+        assert_eq!(tone_marks("A A"), None);
     }
 
     #[test]

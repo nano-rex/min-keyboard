@@ -12,6 +12,8 @@ merges the pinyin sources.
 | `pinyin_lexicon.tsv` | pinyin → Simplified and Traditional candidates, ranked by frequency; 4th column is the top word's frequency, used to segment whole sentences | CC-CEDICT, Fcitx5 Pinyin Zhwiki, OpenCC, re-ranked with jieba `dict.txt` and FrequencyWords `zh_cn_full.txt` |
 | `japanese_lexicon.tsv` | hiragana reading → kanji candidates, in SKK's curated order; 3rd column ranks readings for completion | SKK-JISYO.L (okuri-nasi entries), FrequencyWords `ja_full.txt` |
 | `korean_lexicon.tsv` | romanization → Hangul words, most frequent first | FrequencyWords `ko_full.txt`, romanized by the build script |
+| `pinyin_readings.tsv` | Chinese word → pinyin with tone marks, for showing how selected text is read | CC-CEDICT, ranked with the pinyin lexicon |
+| `japanese_readings.tsv` | Japanese word with kanji → kana reading; `食b`-style keys read kanji with a kana ending | the Japanese lexicon and SKK-JISYO.L (okuri-ari entries) |
 | `*_shortcuts.tsv` | hand-written abbreviations and phrases | this project |
 
 ## Licenses
@@ -41,10 +43,13 @@ $D pinyin-sources --cedict cedict_1_0_ts_utf-8_mdbg.txt.gz --fcitx-simplified zh
 $D chinese --jieba dict.txt --frequency zh_cn_full.txt \
     --opencc-characters TSCharacters.txt --opencc-phrases TSPhrases.txt
 $D japanese --skk SKK-JISYO.L --frequency ja_full.txt
+$D pinyin-readings --cedict cedict_1_0_ts_utf-8_mdbg.txt.gz          # after chinese
+$D japanese-readings --skk SKK-JISYO.L                                # after japanese
 $D korean --frequency ko_full.txt
 ```
 
-`pinyin-sources` writes an unranked lexicon, so run `chinese` after it. `chinese` also adds a
+`pinyin-sources` writes an unranked lexicon with every candidate, so run `chinese` after it: it
+ranks the candidates and keeps the 96 most frequent per key. `chinese` also adds a
 few characters that CC-CEDICT lists as Traditional only but that Simplified text uses too, such
 as 妳 (you, to a woman) and 牠 (it, for animals); the list is `VARIANTS` in the tool, and
 `dicttool pinyin-variants` adds it to the shipped lexicon without the other sources. The tool uses

@@ -301,6 +301,97 @@ pub fn to_hiragana(romaji_text: &str, finish: bool) -> String {
     out
 }
 
+/// Hepburn romaji for kana: "きょうと" is "kyouto", "がっこう" is "gakkou", "ラーメン" is
+/// "raamen". Other characters are kept.
+pub fn to_romaji(kana: &str) -> String {
+    const BASE: &str = "あa いi うu えe おo かka きki くku けke こko がga ぎgi ぐgu げge ごgo \
+        さsa しshi すsu せse そso ざza じji ずzu ぜze ぞzo たta ちchi つtsu てte とto だda ぢji づzu でde どdo \
+        なna にni ぬnu ねne のno はha ひhi ふfu へhe ほho ばba びbi ぶbu べbe ぼbo ぱpa ぴpi ぷpu ぺpe ぽpo \
+        まma みmi むmu めme もmo やya ゆyu よyo らra りri るru れre ろro わwa ゐi ゑe をwo んn ゔvu \
+        ぁa ぃi ぅu ぇe ぉo ゃya ゅyu ょyo ゎwa";
+    static TABLE: OnceLock<HashMap<char, &'static str>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        BASE.split_whitespace()
+            .filter_map(|pair| {
+                let mut chars = pair.char_indices();
+                let (_, kana) = chars.next()?;
+                let (at, _) = chars.next()?;
+                Some((kana, &pair[at..]))
+            })
+            .collect()
+    });
+    let chars: Vec<char> = kana.chars().map(katakana_to_hiragana).collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match c {
+            // Small tsu doubles the next consonant ("tch" before ch).
+            'っ' => {
+                if let Some(romaji) = next.and_then(|n| table.get(&n)) {
+                    out.push_str(if romaji.starts_with("ch") { "t" } else { &romaji[..1] });
+                }
+                i += 1;
+                continue;
+            }
+            // The long-vowel mark repeats the vowel before it.
+            'ー' => {
+                if let Some(vowel) = out.chars().last().filter(|v| "aeiou".contains(*v)) {
+                    out.push(vowel);
+                }
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        let Some(&romaji) = table.get(&c) else {
+            out.push(c);
+            i += 1;
+            continue;
+        };
+        match next {
+            // きゃ is kya, しゃ is sha, じょ is jo.
+            Some(small @ ('ゃ' | 'ゅ' | 'ょ')) if romaji.ends_with('i') && romaji.len() > 1 => {
+                let stem = &romaji[..romaji.len() - 1];
+                let vowel = &table[&small][1..];
+                out.push_str(stem);
+                if !matches!(stem, "sh" | "ch" | "j") {
+                    out.push('y');
+                }
+                out.push_str(vowel);
+                i += 2;
+            }
+            // ふぁ is fa, てぃ is ti, うぃ is wi.
+            Some(small @ ('ぁ' | 'ぃ' | 'ぅ' | 'ぇ' | 'ぉ')) if romaji != "n" => {
+                let stem = if romaji == "u" { "w" } else { romaji.trim_end_matches(['a', 'i', 'u', 'e', 'o']) };
+                out.push_str(stem);
+                out.push_str(table[&small]);
+                i += 2;
+            }
+            _ => {
+                out.push_str(romaji);
+                // ん before a vowel or y is written n' (kin'en, not kinen).
+                if c == 'ん'
+                    && next.and_then(|n| table.get(&katakana_to_hiragana(n))).is_some_and(|r| r.starts_with(['a', 'i', 'u', 'e', 'o', 'y']))
+                {
+                    out.push('\'');
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn katakana_to_hiragana(c: char) -> char {
+    if ('ァ'..='ヶ').contains(&c) {
+        char::from_u32(c as u32 - 0x60).unwrap_or(c)
+    } else {
+        c
+    }
+}
+
 pub fn to_katakana(hiragana: &str) -> String {
     hiragana.chars().map(|c| if ('ぁ'..='ゖ').contains(&c) { char::from_u32(c as u32 + 0x60).unwrap_or(c) } else { c }).collect()
 }

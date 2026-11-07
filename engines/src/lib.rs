@@ -10,6 +10,7 @@ pub mod japanese;
 pub mod korean;
 pub mod latin;
 pub mod pinyin;
+pub mod readings;
 
 pub use japanese::JapaneseEngine;
 pub use korean::KoreanEngine;

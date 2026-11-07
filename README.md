@@ -23,6 +23,7 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
   name on the space bar.
 - Shift capitalises the next letter only; tap it twice to lock capitals (⇪).
+- **Pronunciation of selected text.** Select Chinese, Japanese or Korean text and the bar above the keys shows its pinyin (with tone marks), romaji or romanization; tap it to see it all, or to type it in place of the selection.
 - Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
 - Space types the full-width 　 in Chinese and Japanese; a setting switches it to a normal space.
 - **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some

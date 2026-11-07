@@ -13,7 +13,7 @@ pub const THEME_LIGHT: &str = "light";
 pub const THEME_DARK: &str = "dark";
 
 /// The on/off settings shown as switches: (preference key, default).
-pub const SWITCHES: [(&str, bool); 8] = [
+pub const SWITCHES: [(&str, bool); 9] = [
     ("key_vibration", true),
     ("key_popup", true),
     ("number_row_hints", true),
@@ -23,6 +23,7 @@ pub const SWITCHES: [(&str, bool); 8] = [
     ("grammar_button", false),
     ("normal_space", false),
     ("romaji_keys", false),
+    ("romanize_selection", true),
 ];
 /// The display name of the installed AI model.
 pub const KEY_MODEL_NAME: &str = "grammar_model_name";
@@ -160,6 +161,7 @@ pub fn load(env: Env, context: jobject) -> Settings {
         grammar_button: bool_of(SWITCHES[5].0, SWITCHES[5].1),
         normal_space: bool_of(SWITCHES[6].0, SWITCHES[6].1),
         romaji_keys: bool_of(SWITCHES[7].0, SWITCHES[7].1),
+        romanize_selection: bool_of(SWITCHES[8].0, SWITCHES[8].1),
         languages,
     }
 }

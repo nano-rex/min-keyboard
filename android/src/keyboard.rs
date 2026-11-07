@@ -1,10 +1,11 @@
 //! The keyboard itself: layout, drawing, touch handling and typing logic. It talks to Android
 //! only through the [`Editor`], [`Host`] and [`Canvas`] traits, so it runs in desktop tests too.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
+use engines::readings::{self, ReadingTable, Script};
 use engines::{japanese, korean, Assets, JapaneseEngine, KoreanEngine, LatinEngine, PinyinEngine, ScriptMode};
 use grammar::{Change, Language, Update};
 
@@ -180,6 +181,8 @@ pub struct Settings {
     pub normal_space: bool,
     /// Japanese and Korean are typed in romaji on the QWERTY keys instead of kana and Hangul keys.
     pub romaji_keys: bool,
+    /// Show how selected Chinese, Japanese or Korean text is pronounced.
+    pub romanize_selection: bool,
     /// Enabled flags, indexed like [`MODES`].
     pub languages: [bool; 6],
 }
@@ -196,6 +199,7 @@ impl Default for Settings {
             grammar_button: false,
             normal_space: false,
             romaji_keys: false,
+            romanize_selection: true,
             languages: [true; 6],
         }
     }
@@ -217,6 +221,10 @@ pub struct Engines {
     pinyin: OnceLock<Option<PinyinEngine>>,
     japanese: OnceLock<Option<JapaneseEngine>>,
     korean: OnceLock<Option<KoreanEngine>>,
+    /// Pronunciations for selected text, loaded the first time they are needed.
+    pinyin_readings: OnceLock<Option<ReadingTable>>,
+    japanese_readings: OnceLock<Option<ReadingTable>>,
+    readings_loading: [AtomicBool; 2],
     /// Bumped whenever a dictionary finishes loading, so stale candidate lists get refreshed.
     generation: AtomicU64,
     on_loaded: Box<dyn Fn() + Send + Sync>,
@@ -235,6 +243,9 @@ impl Engines {
             pinyin: OnceLock::new(),
             japanese: OnceLock::new(),
             korean: OnceLock::new(),
+            pinyin_readings: OnceLock::new(),
+            japanese_readings: OnceLock::new(),
+            readings_loading: [AtomicBool::new(false), AtomicBool::new(false)],
             generation: AtomicU64::new(0),
             on_loaded,
         })
@@ -275,6 +286,33 @@ impl Engines {
     fn korean(&self, block: bool) -> Option<&KoreanEngine> {
         let assets = &*self.assets;
         self.get(&self.korean, block, || loaded("Korean", KoreanEngine::new(assets)))
+    }
+
+    /// How `text` is pronounced, if it has Chinese, Japanese or Korean. Returns `None` while the
+    /// readings load in the background (unless `block`); `on_loaded` is called when they are ready.
+    pub fn romanize(self: &Arc<Self>, text: &str, kanji_are_japanese: bool, block: bool) -> Option<(Script, String)> {
+        let script = readings::detect(text, kanji_are_japanese)?;
+        let (cell, name, slot) = match script {
+            Script::Korean => return Some((script, readings::korean(text))),
+            Script::Chinese => (&self.pinyin_readings, readings::PINYIN_READINGS, 0),
+            Script::Japanese => (&self.japanese_readings, readings::JAPANESE_READINGS, 1),
+        };
+        let load = |engines: &Engines| engines.get(cell, true, || loaded("pronunciation", ReadingTable::load(&*engines.assets, name)));
+        let table = if block {
+            load(self)
+        } else {
+            let table = cell.get().and_then(Option::as_ref);
+            if cell.get().is_none() && !self.readings_loading[slot].swap(true, Ordering::SeqCst) {
+                let engines = Arc::clone(self);
+                let _ = std::thread::Builder::new().name("min-keyboard-readings".into()).spawn(move || {
+                    let cell = if slot == 0 { &engines.pinyin_readings } else { &engines.japanese_readings };
+                    engines.get(cell, true, || loaded("pronunciation", ReadingTable::load(&*engines.assets, name)));
+                    (engines.on_loaded)();
+                });
+            }
+            table
+        }?;
+        Some((script, if script == Script::Chinese { readings::chinese(table, text) } else { readings::japanese(table, text) }))
     }
 
     fn is_loaded(&self, mode: Mode) -> bool {
@@ -632,6 +670,7 @@ enum Target {
     PanelDrag,
     Slider,
     GrammarButton,
+    Romanization,
     GrammarClose,
     GrammarReplace,
     GrammarDrag,
@@ -752,6 +791,11 @@ pub struct Keyboard {
 
     /// Whether the editor has text selected, which offers the AI check.
     selection: bool,
+    /// The selected text, read when the selection changes, and how it is pronounced.
+    selected_text: Option<String>,
+    romanized: Option<(Script, String)>,
+    /// The dictionary generation `romanized` was made with; `None` when it must be made again.
+    romanized_generation: Option<u64>,
     proofreader: Option<Box<dyn Proofreader>>,
     grammar: Option<GrammarPanel>,
     grammar_requests: u64,
@@ -790,6 +834,9 @@ impl Keyboard {
             strip_content: 0.0,
             panel_scroll: 0.0,
             selection: false,
+            selected_text: None,
+            romanized: None,
+            romanized_generation: None,
             proofreader: None,
             grammar: None,
             grammar_requests: 0,
@@ -842,6 +889,7 @@ impl Keyboard {
     pub fn on_start_input(&mut self, host: &mut dyn Host, has_selection: bool) {
         self.stop_timer(host);
         self.selection = has_selection;
+        self.set_selected_text(None);
         self.close_grammar();
         if !self.settings.enabled(self.mode) {
             self.mode = self.first_enabled_mode();
@@ -866,6 +914,13 @@ impl Keyboard {
         if selection != self.selection {
             self.selection = selection;
             host.invalidate();
+        }
+        if self.settings.romanize_selection {
+            let text = if selection { editor.selected_text().filter(|t| !t.is_empty()) } else { None };
+            if text != self.selected_text {
+                self.set_selected_text(text);
+                host.invalidate();
+            }
         }
         // The user moved the cursor away from the word being typed: finish it where it is.
         if self.mode.is_latin() && !self.composing.is_empty() && (sel_start != candidates_end || sel_end != candidates_end) {
@@ -1432,6 +1487,9 @@ impl Keyboard {
         if self.grammar_button_visible() && self.grammar_button(canvas).contains(x, y) {
             return Target::GrammarButton;
         }
+        if self.romanization_visible() && self.romanization_rect(canvas).contains(x, y) {
+            return Target::Romanization;
+        }
         let strip = self.strip_rect(self.composing_label_width(canvas));
         if strip.contains(x, y) {
             let chips = self.chip_rects(canvas, strip);
@@ -1620,6 +1678,10 @@ impl Keyboard {
                 self.haptic(host);
                 self.start_grammar(editor, host);
             }
+            Target::Romanization => {
+                self.haptic(host);
+                self.open_romanization(host);
+            }
             Target::GrammarClose => self.close_grammar(),
             Target::GrammarReplace => self.replace_with_correction(editor),
             _ => {}
@@ -1665,6 +1727,63 @@ impl Keyboard {
 
     fn pressed(&self, index: usize) -> bool {
         self.presses.iter().any(|p| p.target == Target::Key(index))
+    }
+
+    // -------------------------------------------------------- pronunciation ----
+
+    /// Longest selection whose pronunciation is shown.
+    const MAX_ROMANIZED_CHARS: usize = 2000;
+
+    fn set_selected_text(&mut self, text: Option<String>) {
+        self.selected_text = text.map(|t| t.chars().take(Self::MAX_ROMANIZED_CHARS).collect());
+        self.romanized = None;
+        self.romanized_generation = None;
+    }
+
+    /// Works out the selection's pronunciation, again once a reading table has loaded.
+    fn refresh_romanization(&mut self) {
+        let generation = self.engines.generation();
+        if self.romanized_generation == Some(generation) {
+            return;
+        }
+        self.romanized_generation = Some(generation);
+        let Some(text) = self.selected_text.as_deref().filter(|_| self.settings.romanize_selection) else { return };
+        self.romanized = self.engines.romanize(text, self.mode == Mode::Japanese, false);
+    }
+
+    fn romanization_visible(&self) -> bool {
+        self.romanized.is_some() && self.selection && self.grammar.is_none() && self.composing.is_empty() && self.candidates.is_empty()
+    }
+
+    /// Where the pronunciation is shown in the bar: after the AI check button, if that is shown.
+    fn romanization_rect(&self, canvas: &mut dyn Canvas) -> Rect {
+        let strip = self.strip_rect(0.0);
+        let left = if self.grammar_button_visible() { self.grammar_button(canvas).right + self.dp(8.0) } else { strip.left + self.dp(4.0) };
+        Rect::new(left.min(strip.right), strip.top, strip.right, strip.bottom)
+    }
+
+    /// Shows the whole selection and its pronunciation in the panel; Replace types the
+    /// pronunciation in place of the selection.
+    fn open_romanization(&mut self, host: &mut dyn Host) {
+        let (Some(text), Some((script, romanized))) = (self.selected_text.clone(), self.romanized.clone()) else { return };
+        self.grammar_requests += 1;
+        let name = match script {
+            Script::Chinese => "Pinyin",
+            Script::Japanese => "Romaji",
+            Script::Korean => "Romanization",
+        };
+        self.suggestions_expanded = false;
+        self.grammar = Some(GrammarPanel {
+            request: self.grammar_requests,
+            original: text.clone(),
+            title: name.into(),
+            body: vec![(Change::Same, text), (Change::Same, "\n".into()), (Change::Added, romanized.clone())],
+            result: Some(romanized),
+            finished: true,
+            scroll: 0.0,
+            lines: None,
+        });
+        host.invalidate();
     }
 
     // -------------------------------------------------------- grammar check ----
@@ -1927,6 +2046,7 @@ impl Keyboard {
 
     pub fn draw(&mut self, canvas: &mut dyn Canvas) {
         self.refresh_candidates();
+        self.refresh_romanization();
         self.apply_grammar_updates();
         let theme = self.theme;
         canvas.fill(theme.background);
@@ -1974,6 +2094,15 @@ impl Keyboard {
             let button = self.grammar_button(canvas);
             canvas.round_rect(button, self.dp(18.0), theme.candidate_highlight);
             self.centered_text(canvas, GRAMMAR_BUTTON, button, self.sp(15.0), theme.accent, true);
+        }
+        if self.romanization_visible() {
+            let rect = self.romanization_rect(canvas);
+            let size = self.sp(15.0);
+            let text = self.romanized.as_ref().map(|(_, text)| text.replace('\n', " ")).unwrap_or_default();
+            let text = self.fit(canvas, &text, size, false, rect.width(), false);
+            let (ascent, descent) = canvas.metrics(size, false);
+            let baseline = rect.center_y() - (ascent + descent) / 2.0;
+            canvas.text(&text, rect.left, baseline, TextStyle { size, color: theme.text, bold: false, align: Align::Left });
         }
 
         if self.grammar.is_some() {
@@ -2397,6 +2526,41 @@ mod tests {
         tap_key(&mut kb, KEY_ENTER, &mut editor);
         tap_key(&mut kb, ".", &mut editor);
         assert_eq!(editor.text, "한국 꽃.");
+    }
+
+    #[test]
+    fn shows_the_pronunciation_of_selected_text() {
+        let mut kb = keyboard();
+        let mut host = FakeHost::default();
+        kb.engines.romanize("你", false, true); // load the table now instead of in the background
+        let mut editor = FakeEditor { text: "我爱你".into(), selected: Some("我爱你".into()), ..Default::default() };
+        kb.on_update_selection(&mut editor, &mut host, 0, 3, -1);
+        kb.draw(&mut FakeCanvas);
+        assert!(kb.romanization_visible());
+        assert_eq!(kb.romanized, Some((Script::Chinese, "wǒ ài nǐ".into())));
+        let rect = kb.romanization_rect(&mut FakeCanvas);
+        tap(&mut kb, rect, &mut editor);
+        let panel = kb.grammar.as_ref().expect("the panel opens");
+        assert_eq!(panel.result.as_deref(), Some("wǒ ài nǐ"));
+        let replace = kb.grammar_replace_rect();
+        tap(&mut kb, replace, &mut editor);
+        assert_eq!(editor.text, "wǒ ài nǐ");
+        assert!(kb.grammar.is_none());
+
+        // Korean needs no table; nothing is shown for other text or when turned off.
+        let mut editor = FakeEditor { selected: Some("안녕하세요".into()), ..Default::default() };
+        kb.on_update_selection(&mut editor, &mut host, 0, 5, -1);
+        kb.draw(&mut FakeCanvas);
+        assert_eq!(kb.romanized, Some((Script::Korean, "annyeonghaseyo".into())));
+        editor.selected = Some("hello".into());
+        kb.on_update_selection(&mut editor, &mut host, 0, 4, -1);
+        kb.draw(&mut FakeCanvas);
+        assert!(!kb.romanization_visible());
+        kb.apply_settings(Settings { romanize_selection: false, ..Settings::default() });
+        editor.selected = Some("안녕".into());
+        kb.on_update_selection(&mut editor, &mut host, 0, 2, -1);
+        kb.draw(&mut FakeCanvas);
+        assert!(!kb.romanization_visible());
     }
 
     #[test]

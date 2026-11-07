@@ -56,6 +56,7 @@
         <Switch android:id="@+id/auto_space_toggle" style="@style/SettingSwitch" android:text="@string/auto_space" />
         <Switch android:id="@+id/normal_space_toggle" style="@style/SettingSwitch" android:text="@string/normal_space" />
         <Switch android:id="@+id/romaji_keys_toggle" style="@style/SettingSwitch" android:text="@string/romaji_keys" />
+        <Switch android:id="@+id/romanize_selection_toggle" style="@style/SettingSwitch" android:text="@string/romanize_selection" />
 
         <!-- Languages -->
         <TextView style="@style/SectionTitle" android:text="@string/section_languages" />

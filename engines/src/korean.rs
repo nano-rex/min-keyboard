@@ -309,6 +309,56 @@ fn transliterate(text: &str) -> String {
     out
 }
 
+/// Final consonants as pronounced at the end of a syllable.
+const FINAL_SOUNDS: [&str; 28] = [
+    "", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l", "l", "p", "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p",
+    "t",
+];
+
+/// Revised Romanization of a word with its common sound changes: a final consonant moves onto a
+/// following vowel (한국어 is hangugeo), k, t, p become ng, n, m before n or m (감사합니다 is
+/// gamsahamnida), and ㄹ next to ㄴ or ㄹ is l (신라 is silla). Other characters are kept.
+pub fn romanize(text: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let parts = |c: char| {
+        let code = (c as u32).checked_sub(0xAC00).filter(|&code| code < 11172)? as usize;
+        Some((code / 588, (code % 588) / 28, code % 28))
+    };
+    for (index, &c) in chars.iter().enumerate() {
+        let Some((initial, medial, fin)) = parts(c) else {
+            out.push(c);
+            continue;
+        };
+        let previous = index.checked_sub(1).and_then(|i| parts(chars[i]));
+        let following = chars.get(index + 1).and_then(|&c| parts(c));
+        let lead = match previous {
+            // The previous final has moved onto this syllable.
+            Some((_, _, f)) if initial == 11 && !matches!(f, 0 | 21) => "",
+            Some((_, _, f)) if initial == 5 && matches!(FINAL_SOUNDS[f], "l" | "n") => "l",
+            _ => INITIALS[initial],
+        };
+        out.push_str(lead);
+        out.push_str(MEDIALS[medial]);
+        if fin == 0 {
+            continue;
+        }
+        if following.is_some_and(|f| f.0 == 11) && fin != 21 {
+            out.push_str(FINAL_LETTERS[fin]);
+            continue;
+        }
+        let coda = match (FINAL_SOUNDS[fin], following.map(|f| INITIALS[f.0])) {
+            ("k", Some("n" | "m")) => "ng",
+            ("t", Some("n" | "m")) => "n",
+            ("p", Some("n" | "m")) => "m",
+            ("n", Some("r")) => "l",
+            (sound, _) => sound,
+        };
+        out.push_str(coda);
+    }
+    out
+}
+
 fn syllables() -> &'static HashMap<String, char> {
     static MAP: OnceLock<HashMap<String, char>> = OnceLock::new();
     MAP.get_or_init(|| {

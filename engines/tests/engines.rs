@@ -145,6 +145,36 @@ fn korean_words_and_syllables() {
 }
 
 #[test]
+fn romanizes_selected_text() {
+    use engines::readings::{self, ReadingTable, Script};
+    let assets = DirAssets(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../assets"));
+    let pinyin = ReadingTable::load(&assets, readings::PINYIN_READINGS).unwrap();
+    assert_eq!(readings::chinese(&pinyin, "我爱你。"), "wǒ ài nǐ.");
+    assert_eq!(readings::chinese(&pinyin, "我在银行工作，他是行人"), "wǒ zài yínháng gōngzuò, tā shì xíngrén");
+    assert_eq!(readings::chinese(&pinyin, "我用iPhone 2个"), "wǒ yòng iPhone 2 gè");
+    assert_eq!(readings::chinese(&pinyin, "時間"), "shíjiān", "Traditional characters too");
+
+    let kana = ReadingTable::load(&assets, readings::JAPANESE_READINGS).unwrap();
+    assert_eq!(readings::japanese(&kana, "日本語を話します。"), "nihongo o hanashimasu.");
+    assert_eq!(readings::japanese(&kana, "私は学校に行った"), "watashi wa gakkou ni itta");
+    assert_eq!(readings::japanese(&kana, "ラーメンを食べる"), "raamen o taberu");
+    assert_eq!(japanese::to_romaji("きょうはしんぶんをよんだ"), "kyouhashinbunwoyonda");
+    assert_eq!(japanese::to_romaji("ちょっと"), "chotto");
+    assert_eq!(japanese::to_romaji("きんえん"), "kin'en");
+    assert_eq!(japanese::to_romaji("フィルム"), "firumu");
+
+    assert_eq!(readings::korean("한국어를 공부해요!"), "hangugeoreul gongbuhaeyo!");
+    assert_eq!(korean::romanize("감사합니다"), "gamsahamnida");
+    assert_eq!(korean::romanize("신라"), "silla");
+
+    assert_eq!(readings::detect("你好", false), Some(Script::Chinese));
+    assert_eq!(readings::detect("日本", true), Some(Script::Japanese));
+    assert_eq!(readings::detect("すし", false), Some(Script::Japanese));
+    assert_eq!(readings::detect("안녕", false), Some(Script::Korean));
+    assert_eq!(readings::detect("hello", false), None);
+}
+
+#[test]
 fn hangul_keys() {
     let korean = &all().korean;
     assert_eq!(korean::compose_keys("ㅎㅏㄴㄱㅜㄱ"), "한국");

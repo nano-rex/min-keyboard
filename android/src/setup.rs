@@ -33,6 +33,7 @@ fn switches() -> Vec<(String, String, bool)> {
         "grammar_button_toggle",
         "normal_space_toggle",
         "romaji_keys_toggle",
+        "romanize_selection_toggle",
     ]
     .iter()
     .zip(prefs::SWITCHES)
