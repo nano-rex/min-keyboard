@@ -428,6 +428,42 @@ fn romanization(label: &str) -> Option<&'static str> {
         "を" => "wo",
         "ん" => "n",
         "ー" => "-",
+        "が" => "ga",
+        "ぎ" => "gi",
+        "ぐ" => "gu",
+        "げ" => "ge",
+        "ご" => "go",
+        "ざ" => "za",
+        "じ" => "ji",
+        "ず" => "zu",
+        "ぜ" => "ze",
+        "ぞ" => "zo",
+        "だ" => "da",
+        "ぢ" => "ji",
+        "づ" => "zu",
+        "で" => "de",
+        "ど" => "do",
+        "ば" => "ba",
+        "び" => "bi",
+        "ぶ" => "bu",
+        "べ" => "be",
+        "ぼ" => "bo",
+        "ぱ" => "pa",
+        "ぴ" => "pi",
+        "ぷ" => "pu",
+        "ぺ" => "pe",
+        "ぽ" => "po",
+        "ゔ" => "vu",
+        "ぁ" => "a",
+        "ぃ" => "i",
+        "ぅ" => "u",
+        "ぇ" => "e",
+        "ぉ" => "o",
+        "っ" => "tsu",
+        "ゃ" => "ya",
+        "ゅ" => "yu",
+        "ょ" => "yo",
+        "ゎ" => "wa",
         "ㅂ" => "b",
         "ㅈ" => "j",
         "ㄷ" => "d",
@@ -478,19 +514,12 @@ fn swap(c: char, from: &str, to: &str) -> Option<char> {
     from.chars().position(|f| f == c).and_then(|i| to.chars().nth(i))
 }
 
-/// What ゛, ゜ and 小 make of the kana before them; tapping again undoes it.
-fn modify_kana(c: char, key: &str) -> Option<char> {
-    const PLAIN: &str = "かきくけこさしすせそたちつてとはひふへほう";
-    const VOICED: &str = "がぎぐげござじずぜぞだぢづでどばびぶべぼゔ";
-    const H_ROW: &str = "はひふへほ";
-    const B_ROW: &str = "ばびぶべぼ";
-    const P_ROW: &str = "ぱぴぷぺぽ";
-    const LARGE: &str = "あいうえおつやゆよわ";
-    const SMALL: &str = "ぁぃぅぇぉっゃゅょゎ";
-    match key {
-        KEY_DAKUTEN => swap(c, PLAIN, VOICED).or_else(|| swap(c, VOICED, PLAIN)).or_else(|| swap(c, P_ROW, B_ROW)),
-        KEY_HANDAKUTEN => swap(c, H_ROW, P_ROW).or_else(|| swap(c, P_ROW, H_ROW)).or_else(|| swap(c, B_ROW, P_ROW)),
-        KEY_SMALL => swap(c, LARGE, SMALL).or_else(|| swap(c, SMALL, LARGE)),
+/// The kana a key types while ゛, ゜ or 小 is on (か is が), if it has such a form.
+fn kana_variant(c: char, modifier: &str) -> Option<char> {
+    match modifier {
+        KEY_DAKUTEN => swap(c, "かきくけこさしすせそたちつてとはひふへほう", "がぎぐげござじずぜぞだぢづでどばびぶべぼゔ"),
+        KEY_HANDAKUTEN => swap(c, "はひふへほ", "ぱぴぷぺぽ"),
+        KEY_SMALL => swap(c, "あいうえおつやゆよわ", "ぁぃぅぇぉっゃゅょゎ"),
         _ => None,
     }
 }
@@ -536,7 +565,10 @@ const TYPE_MASK_CLASS: i32 = 0xf;
 const TYPE_NULL: i32 = 0;
 
 fn is_function_key(key: &str) -> bool {
-    matches!(key, KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA)
+    matches!(
+        key,
+        KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA | KEY_DAKUTEN | KEY_HANDAKUTEN | KEY_SMALL
+    )
 }
 
 fn weight(key: &str) -> f32 {
@@ -706,6 +738,9 @@ pub struct Keyboard {
     suggestions_expanded: bool,
     /// The kana keys type katakana.
     katakana: bool,
+    /// ゛, ゜ or 小 while it changes the kana keys; like Shift, it lasts one kana unless locked.
+    kana_modifier: Option<(&'static str, Shift)>,
+    kana_modifier_tapped: Option<Instant>,
 
     keys: Vec<Key>,
     presses: Vec<Press>,
@@ -745,6 +780,8 @@ impl Keyboard {
             symbols_page_two: false,
             suggestions_expanded: false,
             katakana: false,
+            kana_modifier: None,
+            kana_modifier_tapped: None,
             keys: Vec::new(),
             presses: Vec::new(),
             timer: Timer::None,
@@ -937,7 +974,21 @@ impl Keyboard {
             KEY_BACKSPACE => "⌫".into(),
             KEY_SYMBOLS => "?123".into(),
             KEY_LETTERS => "ABC".into(),
-            _ if self.kana_keys() && self.katakana && !self.symbols_mode => japanese::to_katakana(key),
+            // The marks alone draw small and off-centre, so the keys show a kana that has them.
+            KEY_DAKUTEN => "が".into(),
+            KEY_HANDAKUTEN => "ぱ".into(),
+            _ if self.kana_keys() && !self.symbols_mode => {
+                let mut chars = key.chars();
+                let kana = match (chars.next(), chars.next(), self.kana_modifier) {
+                    (Some(c), None, Some((modifier, _))) => kana_variant(c, modifier).map_or(key.to_string(), String::from),
+                    _ => key.to_string(),
+                };
+                if self.katakana {
+                    japanese::to_katakana(&kana)
+                } else {
+                    kana
+                }
+            }
             _ if self.mode == Mode::Korean && self.shift != Shift::Off && !self.symbols_mode => {
                 HANGUL_SHIFTED.iter().find(|(plain, _)| *plain == key).map_or(key, |&(_, shifted)| shifted).into()
             }
@@ -991,10 +1042,14 @@ impl Keyboard {
                 self.schedule_refresh(host);
             }
             KEY_DAKUTEN | KEY_HANDAKUTEN | KEY_SMALL if self.kana_keys() => {
-                if let Some(last) = self.composing.pop() {
-                    self.composing.push(modify_kana(last, key).unwrap_or(last));
-                }
-                self.schedule_refresh(host);
+                let modifier = [KEY_DAKUTEN, KEY_HANDAKUTEN, KEY_SMALL].into_iter().find(|&m| m == key).unwrap_or(KEY_DAKUTEN);
+                let double_tap = self.kana_modifier_tapped.is_some_and(|at| at.elapsed().as_millis() < DOUBLE_TAP_MS);
+                self.kana_modifier = match self.kana_modifier {
+                    Some((current, Shift::Once)) if current == modifier && double_tap => Some((modifier, Shift::Locked)),
+                    Some((current, _)) if current == modifier => None,
+                    _ => Some((modifier, Shift::Once)),
+                };
+                self.kana_modifier_tapped = matches!(self.kana_modifier, Some((_, Shift::Once))).then(Instant::now);
             }
             _ => {
                 let label = self.label_for(key);
@@ -1048,6 +1103,9 @@ impl Keyboard {
         let Some(ch) = chars.next() else { return };
         if self.shift == Shift::Once && ch.is_alphabetic() {
             self.shift = Shift::Off;
+        }
+        if matches!(self.kana_modifier, Some((_, Shift::Once))) && ch.is_alphabetic() {
+            self.kana_modifier = None;
         }
         // The long-vowel mark continues the word being typed ("ra-men" is らーめん).
         if self.mode == Mode::Japanese && !self.native_keys() && ch == 'ー' && !self.composing.is_empty() {
@@ -1937,7 +1995,9 @@ impl Keyboard {
         for (i, key) in self.keys.iter().enumerate() {
             let pressed = self.pressed(i);
             let function = is_function_key(key.key);
-            let enter = key.key == KEY_ENTER;
+            // A locked ゛, ゜ or 小 is filled like Enter.
+            let modifier = self.kana_modifier.filter(|&(m, _)| m == key.key && self.kana_keys()).map(|(_, lock)| lock);
+            let enter = key.key == KEY_ENTER || modifier == Some(Shift::Locked);
             let fill = match (enter, function, pressed) {
                 (true, _, true) | (false, true, true) => theme.function_key_pressed,
                 (true, _, false) => theme.accent,
@@ -1948,14 +2008,25 @@ impl Keyboard {
             self.key_background(canvas, key.rect, fill);
             let (size, color) = if key.key == KEY_SPACE {
                 (self.sp(13.0), theme.text_muted)
-            } else if enter {
+            } else if key.key == KEY_ENTER {
                 (self.sp(26.0), theme.accent_text)
+            } else if enter {
+                (self.sp(20.0), theme.accent_text)
             } else if function {
                 let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA);
-                let on = (key.key == KEY_SHIFT && self.shift != Shift::Off) || (key.key == KEY_KATAKANA && self.katakana);
+                let on =
+                    (key.key == KEY_SHIFT && self.shift != Shift::Off) || (key.key == KEY_KATAKANA && self.katakana) || modifier.is_some();
                 (self.sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
             } else if self.kana_keys() && !self.symbols_mode {
-                (self.sp(18.0), theme.text)
+                // While ゛, ゜ or 小 is on, kana without that form are dimmed (they still type).
+                let unchanged = self.kana_modifier.is_some_and(|(m, _)| {
+                    let mut chars = key.key.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => romanization(key.key).is_some() && kana_variant(c, m).is_none(),
+                        _ => false,
+                    }
+                });
+                (self.sp(18.0), if unchanged { theme.text_muted } else { theme.text })
             } else if self.native_keys() && !self.symbols_mode {
                 (self.sp(19.0), theme.text)
             } else {
@@ -1963,7 +2034,7 @@ impl Keyboard {
             };
             let cap = Rect { bottom: key.rect.bottom - self.dp(1.5), ..key.rect };
             let label = self.label_for(key.key);
-            let sound = if self.native_keys() && !self.symbols_mode { romanization(&label) } else { None };
+            let sound = if self.native_keys() && !self.symbols_mode && !function { romanization(&label) } else { None };
             let fitted = self.fit(canvas, &label, size, false, cap.width() - self.dp(4.0), false);
             match sound {
                 // The kana or jamo, with its sound in small letters underneath.
@@ -2260,15 +2331,20 @@ mod tests {
         assert!(kb.height() > height, "six rows of keys");
         assert_eq!(kb.keys.len(), KANA.iter().map(|row| row.len()).sum::<usize>());
         assert_eq!(romanization("し"), Some("shi"));
-        // に ほ ゛ ん: the ゛ key voices the kana before it.
-        for key in ["に", "ほ", KEY_DAKUTEN, "ん"] {
+        // ゛ turns the keys into voiced kana for one kana: に ゛ ほ ん is にぼん.
+        tap_key(&mut kb, "に", &mut editor);
+        tap_key(&mut kb, KEY_DAKUTEN, &mut editor);
+        assert_eq!((kb.label_for("ほ").as_str(), kb.label_for("な").as_str()), ("ぼ", "な"));
+        assert_eq!(romanization("ぼ"), Some("bo"));
+        for key in ["ほ", "ん"] {
             tap_key(&mut kb, key, &mut editor);
         }
         assert_eq!(kb.composing_preview(), "にぼん");
-        tap_key(&mut kb, KEY_DAKUTEN, &mut editor); // nothing to voice on ん
         tap_key(&mut kb, KEY_BACKSPACE, &mut editor);
-        tap_key(&mut kb, KEY_DAKUTEN, &mut editor); // ぼ back to ほ
-        tap_key(&mut kb, "ん", &mut editor);
+        tap_key(&mut kb, KEY_BACKSPACE, &mut editor);
+        for key in ["ほ", "ん"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
         assert_eq!(kb.composing_preview(), "にほん");
         kb.refresh_candidates();
         assert_eq!(kb.candidates.first().map(String::as_str), Some("日本"));
@@ -2283,13 +2359,14 @@ mod tests {
         assert_eq!(kb.composing_preview(), "ラーメン");
         tap_key(&mut kb, KEY_SPACE, &mut editor);
         assert_eq!(editor.text, "日本ラーメン");
-        // 小 makes the kana small: き ゆ 小 → きゅ.
+        // 小 then ゆ is ゅ; ゜ then は is ぱ; tapping ゛ twice keeps it on until it is tapped again.
         tap_key(&mut kb, KEY_KATAKANA, &mut editor);
-        for key in ["き", "ゆ", KEY_SMALL] {
+        for key in ["き", KEY_SMALL, "ゆ", KEY_HANDAKUTEN, "は", KEY_DAKUTEN, KEY_DAKUTEN, "か", "か", KEY_DAKUTEN, "か"] {
             tap_key(&mut kb, key, &mut editor);
         }
+        assert_eq!(kb.kana_modifier, None);
         tap_key(&mut kb, KEY_ENTER, &mut editor);
-        assert_eq!(editor.text, "日本ラーメンきゅ");
+        assert_eq!(editor.text, "日本ラーメンきゅぱががか");
         kb.set_mode(Mode::English, &mut editor, &mut host);
         assert_eq!(kb.height(), height);
     }
