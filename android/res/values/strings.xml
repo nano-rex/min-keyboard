@@ -23,6 +23,7 @@
     <string name="number_row_hints">Long-press top row for numbers</string>
     <string name="auto_correct">Auto-correct English and Malay</string>
     <string name="auto_space">Add a space after picking a suggestion</string>
+    <string name="romaji_keys">Type Japanese and Korean in romaji on the ABC keys, instead of kana and Hangul keys</string>
     <string name="normal_space">Type a normal space in Chinese and Japanese, not the wide 　</string>
     <string name="language_english">English</string>
     <string name="language_malay">Malay (Bahasa Melayu)</string>

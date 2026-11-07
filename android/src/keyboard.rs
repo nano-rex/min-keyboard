@@ -35,6 +35,8 @@ pub trait Host {
     fn schedule_timer(&mut self, delay_ms: i64);
     fn cancel_timer(&mut self);
     fn invalidate(&mut self);
+    /// Measures the view again, after the keyboard's height changed.
+    fn request_layout(&mut self);
 }
 
 /// The on-device AI grammar check, which runs in the background (see `grammar::Worker`).
@@ -176,6 +178,8 @@ pub struct Settings {
     pub grammar_button: bool,
     /// Space types " " in Chinese and Japanese instead of the full-width U+3000.
     pub normal_space: bool,
+    /// Japanese and Korean are typed in romaji on the QWERTY keys instead of kana and Hangul keys.
+    pub romaji_keys: bool,
     /// Enabled flags, indexed like [`MODES`].
     pub languages: [bool; 6],
 }
@@ -191,6 +195,7 @@ impl Default for Settings {
             number_hints: true,
             grammar_button: false,
             normal_space: false,
+            romaji_keys: false,
             languages: [true; 6],
         }
     }
@@ -310,6 +315,8 @@ impl Engines {
         Some(match mode {
             Mode::English | Mode::Malay => self.latin(mode, block)?.candidates(input),
             Mode::Japanese => self.japanese(block)?.candidates(input),
+            // Keys from the Hangul keyboard, or romanized Korean.
+            Mode::Korean if input.starts_with(korean::is_jamo_key) => self.korean(block)?.key_candidates(input),
             Mode::Korean => self.korean(block)?.candidates(input),
             Mode::Traditional => self.pinyin(block)?.candidates(input, ScriptMode::Traditional),
             Mode::Simplified => self.pinyin(block)?.candidates(input, ScriptMode::Simplified),
@@ -341,6 +348,152 @@ const ROW2: &[&str] = &["a", "s", "d", "f", "g", "h", "j", "k", "l"];
 const ROW3: &[&str] = &[KEY_SHIFT, "z", "x", "c", "v", "b", "n", "m", KEY_BACKSPACE];
 const ROW4: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, ".", KEY_ENTER];
 const ROW4_JAPANESE: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, "ー", ".", KEY_ENTER];
+const QWERTY: [&[&str]; 4] = [ROW1, ROW2, ROW3, ROW4];
+const QWERTY_JAPANESE: [&[&str]; 4] = [ROW1, ROW2, ROW3, ROW4_JAPANESE];
+
+const KEY_DAKUTEN: &str = "゛";
+const KEY_HANDAKUTEN: &str = "゜";
+const KEY_SMALL: &str = "小";
+const KEY_KATAKANA: &str = "あ⇄ア";
+
+/// Japanese kana in gojūon order: one consonant per column, the vowels a i u e o down the rows.
+const KANA: [&[&str]; 6] = [
+    &["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", KEY_BACKSPACE],
+    &["い", "き", "し", "ち", "に", "ひ", "み", "、", "り", "を", KEY_DAKUTEN],
+    &["う", "く", "す", "つ", "ぬ", "ふ", "む", "ゆ", "る", "ん", KEY_HANDAKUTEN],
+    &["え", "け", "せ", "て", "ね", "へ", "め", "。", "れ", "？", KEY_SMALL],
+    &["お", "こ", "そ", "と", "の", "ほ", "も", "よ", "ろ", "！", "ー"],
+    &[KEY_SYMBOLS, KEY_KATAKANA, KEY_SPACE, KEY_ENTER],
+];
+
+/// The Korean two-set (Dubeolsik) layout: consonants on the left, vowels on the right.
+const HANGUL: [&[&str]; 4] = [
+    &["ㅂ", "ㅈ", "ㄷ", "ㄱ", "ㅅ", "ㅛ", "ㅕ", "ㅑ", "ㅐ", "ㅔ"],
+    &["ㅁ", "ㄴ", "ㅇ", "ㄹ", "ㅎ", "ㅗ", "ㅓ", "ㅏ", "ㅣ"],
+    &[KEY_SHIFT, "ㅋ", "ㅌ", "ㅊ", "ㅍ", "ㅠ", "ㅜ", "ㅡ", KEY_BACKSPACE],
+    ROW4,
+];
+/// Keys that Shift changes on the Hangul layout.
+const HANGUL_SHIFTED: [(&str, &str); 7] =
+    [("ㅂ", "ㅃ"), ("ㅈ", "ㅉ"), ("ㄷ", "ㄸ"), ("ㄱ", "ㄲ"), ("ㅅ", "ㅆ"), ("ㅐ", "ㅒ"), ("ㅔ", "ㅖ")];
+
+/// The sound of a kana or Hangul key, shown under it.
+fn romanization(label: &str) -> Option<&'static str> {
+    let hiragana: String = label.chars().map(katakana_to_hiragana).collect();
+    Some(match hiragana.as_str() {
+        "あ" => "a",
+        "い" => "i",
+        "う" => "u",
+        "え" => "e",
+        "お" => "o",
+        "か" => "ka",
+        "き" => "ki",
+        "く" => "ku",
+        "け" => "ke",
+        "こ" => "ko",
+        "さ" => "sa",
+        "し" => "shi",
+        "す" => "su",
+        "せ" => "se",
+        "そ" => "so",
+        "た" => "ta",
+        "ち" => "chi",
+        "つ" => "tsu",
+        "て" => "te",
+        "と" => "to",
+        "な" => "na",
+        "に" => "ni",
+        "ぬ" => "nu",
+        "ね" => "ne",
+        "の" => "no",
+        "は" => "ha",
+        "ひ" => "hi",
+        "ふ" => "fu",
+        "へ" => "he",
+        "ほ" => "ho",
+        "ま" => "ma",
+        "み" => "mi",
+        "む" => "mu",
+        "め" => "me",
+        "も" => "mo",
+        "や" => "ya",
+        "ゆ" => "yu",
+        "よ" => "yo",
+        "ら" => "ra",
+        "り" => "ri",
+        "る" => "ru",
+        "れ" => "re",
+        "ろ" => "ro",
+        "わ" => "wa",
+        "を" => "wo",
+        "ん" => "n",
+        "ー" => "-",
+        "ㅂ" => "b",
+        "ㅈ" => "j",
+        "ㄷ" => "d",
+        "ㄱ" => "g",
+        "ㅅ" => "s",
+        "ㅃ" => "pp",
+        "ㅉ" => "jj",
+        "ㄸ" => "tt",
+        "ㄲ" => "kk",
+        "ㅆ" => "ss",
+        "ㅁ" => "m",
+        "ㄴ" => "n",
+        "ㅇ" => "ng",
+        "ㄹ" => "r/l",
+        "ㅎ" => "h",
+        "ㅋ" => "k",
+        "ㅌ" => "t",
+        "ㅊ" => "ch",
+        "ㅍ" => "p",
+        "ㅛ" => "yo",
+        "ㅕ" => "yeo",
+        "ㅑ" => "ya",
+        "ㅐ" => "ae",
+        "ㅔ" => "e",
+        "ㅒ" => "yae",
+        "ㅖ" => "ye",
+        "ㅗ" => "o",
+        "ㅓ" => "eo",
+        "ㅏ" => "a",
+        "ㅣ" => "i",
+        "ㅠ" => "yu",
+        "ㅜ" => "u",
+        "ㅡ" => "eu",
+        _ => return None,
+    })
+}
+
+fn katakana_to_hiragana(c: char) -> char {
+    if ('ァ'..='ヶ').contains(&c) {
+        char::from_u32(c as u32 - 0x60).unwrap_or(c)
+    } else {
+        c
+    }
+}
+
+/// Swaps `c` for the character at the same place in `to`, if it is in `from`.
+fn swap(c: char, from: &str, to: &str) -> Option<char> {
+    from.chars().position(|f| f == c).and_then(|i| to.chars().nth(i))
+}
+
+/// What ゛, ゜ and 小 make of the kana before them; tapping again undoes it.
+fn modify_kana(c: char, key: &str) -> Option<char> {
+    const PLAIN: &str = "かきくけこさしすせそたちつてとはひふへほう";
+    const VOICED: &str = "がぎぐげござじずぜぞだぢづでどばびぶべぼゔ";
+    const H_ROW: &str = "はひふへほ";
+    const B_ROW: &str = "ばびぶべぼ";
+    const P_ROW: &str = "ぱぴぷぺぽ";
+    const LARGE: &str = "あいうえおつやゆよわ";
+    const SMALL: &str = "ぁぃぅぇぉっゃゅょゎ";
+    match key {
+        KEY_DAKUTEN => swap(c, PLAIN, VOICED).or_else(|| swap(c, VOICED, PLAIN)).or_else(|| swap(c, P_ROW, B_ROW)),
+        KEY_HANDAKUTEN => swap(c, H_ROW, P_ROW).or_else(|| swap(c, P_ROW, H_ROW)).or_else(|| swap(c, B_ROW, P_ROW)),
+        KEY_SMALL => swap(c, LARGE, SMALL).or_else(|| swap(c, SMALL, LARGE)),
+        _ => None,
+    }
+}
 
 const EN_SYMBOLS: [&[&str]; 4] = [
     &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
@@ -383,7 +536,7 @@ const TYPE_MASK_CLASS: i32 = 0xf;
 const TYPE_NULL: i32 = 0;
 
 fn is_function_key(key: &str) -> bool {
-    matches!(key, KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS)
+    matches!(key, KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA)
 }
 
 fn weight(key: &str) -> f32 {
@@ -392,10 +545,6 @@ fn weight(key: &str) -> f32 {
         _ if is_function_key(key) || key == KEY_ENTER => 1.5,
         _ => 1.0,
     }
-}
-
-fn is_composing_char(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '\''
 }
 
 /// Keeps the user's capitalisation: "Teh" -> "The", Shift capitalises suggestions and caps lock
@@ -555,6 +704,8 @@ pub struct Keyboard {
     symbols_mode: bool,
     symbols_page_two: bool,
     suggestions_expanded: bool,
+    /// The kana keys type katakana.
+    katakana: bool,
 
     keys: Vec<Key>,
     presses: Vec<Press>,
@@ -593,6 +744,7 @@ impl Keyboard {
             symbols_mode: false,
             symbols_page_two: false,
             suggestions_expanded: false,
+            katakana: false,
             keys: Vec::new(),
             presses: Vec::new(),
             timer: Timer::None,
@@ -689,7 +841,30 @@ impl Keyboard {
     // --------------------------------------------------------------- layout ----
 
     pub fn height(&self) -> f32 {
-        self.dp(4.0 + 44.0 + 2.0 + 4.0 * 58.0 + 6.0)
+        self.dp(4.0 + 44.0 + 2.0 + 6.0) + self.keys_height()
+    }
+
+    /// Japanese and Korean show kana and Hangul keys, unless the user types them in romaji.
+    fn native_keys(&self) -> bool {
+        matches!(self.mode, Mode::Japanese | Mode::Korean) && !self.settings.romaji_keys
+    }
+
+    /// The kana keyboard has six rows of keys, so it is taller (its symbol pages too).
+    fn kana_keys(&self) -> bool {
+        self.mode == Mode::Japanese && self.native_keys()
+    }
+
+    fn keys_height(&self) -> f32 {
+        self.dp(if self.kana_keys() { 6.0 * 46.0 } else { 4.0 * 58.0 })
+    }
+
+    fn row_height(&self) -> f32 {
+        self.keys_height() / self.rows().len() as f32
+    }
+
+    /// Space above and below each key.
+    fn key_gap(&self) -> f32 {
+        self.dp(if self.rows().len() > 4 { 3.0 } else { 4.0 })
     }
 
     pub fn set_width(&mut self, width: f32) {
@@ -705,36 +880,43 @@ impl Keyboard {
 
     fn keys_area(&self) -> Rect {
         let top = self.bar_rect().bottom + self.dp(2.0);
-        Rect::new(self.dp(4.0), top, self.width - self.dp(4.0), top + self.dp(4.0 * 58.0))
+        Rect::new(self.dp(4.0), top, self.width - self.dp(4.0), top + self.keys_height())
     }
 
-    fn rows(&self) -> [&'static [&'static str]; 4] {
+    fn rows(&self) -> &'static [&'static [&'static str]] {
         let latin = self.mode.is_latin();
         match (self.symbols_mode, latin, self.symbols_page_two) {
-            (false, _, _) if self.mode == Mode::Japanese => [ROW1, ROW2, ROW3, ROW4_JAPANESE],
-            (false, _, _) => [ROW1, ROW2, ROW3, ROW4],
-            (true, true, false) => EN_SYMBOLS,
-            (true, true, true) => EN_SYMBOLS_2,
-            (true, false, false) => CN_SYMBOLS,
-            (true, false, true) => CN_SYMBOLS_2,
+            (false, _, _) if self.kana_keys() => &KANA,
+            (false, _, _) if self.mode == Mode::Korean && self.native_keys() => &HANGUL,
+            (false, _, _) if self.mode == Mode::Japanese => &QWERTY_JAPANESE,
+            (false, _, _) => &QWERTY,
+            (true, true, false) => &EN_SYMBOLS,
+            (true, true, true) => &EN_SYMBOLS_2,
+            (true, false, false) => &CN_SYMBOLS,
+            (true, false, true) => &CN_SYMBOLS_2,
         }
     }
 
     fn rebuild(&mut self) {
         self.keys.clear();
         let area = self.keys_area();
-        let hints = !self.symbols_mode && self.settings.number_hints;
-        for (r, row) in self.rows().iter().enumerate() {
-            let padding = if !self.symbols_mode && r == 1 { self.dp(16.0) } else { 0.0 };
+        let rows = self.rows();
+        // The kana grid keeps its columns lined up, so its keys are all the same width.
+        let grid = rows.len() > 4;
+        let hints = !self.symbols_mode && !grid && self.settings.number_hints;
+        let (row_height, gap_y, gap_x) = (self.row_height(), self.key_gap(), self.dp(if grid { 2.0 } else { 3.0 }));
+        for (r, row) in rows.iter().enumerate() {
+            let padding = if !self.symbols_mode && !grid && r == 1 { self.dp(16.0) } else { 0.0 };
             let left = area.left + padding;
             let available = area.width() - 2.0 * padding;
+            let weight = |key: &str| if grid && r + 1 < rows.len() { 1.0 } else { weight(key) };
             let total: f32 = row.iter().map(|k| weight(k)).sum();
-            let top = area.top + r as f32 * self.dp(58.0);
+            let top = area.top + r as f32 * row_height;
             let mut x = left;
             for (i, &key) in row.iter().enumerate() {
                 let w = available * weight(key) / total;
-                let rect = Rect::new(x + self.dp(3.0), top + self.dp(4.0), x + w - self.dp(3.0), top + self.dp(54.0));
-                let hint = (hints && r == 0).then(|| ROW1_DIGITS[i]);
+                let rect = Rect::new(x + gap_x, top + gap_y, x + w - gap_x, top + row_height - gap_y);
+                let hint = (hints && r == 0).then(|| ROW1_DIGITS.get(i).copied()).flatten();
                 self.keys.push(Key { key, rect, hint });
                 x += w;
             }
@@ -744,9 +926,10 @@ impl Keyboard {
     fn label_for(&self, key: &str) -> String {
         let latin = self.mode.is_latin();
         match key {
+            "," | "." if latin || self.mode == Mode::Korean => key.into(),
             "," if self.mode == Mode::Japanese => "、".into(),
-            "," if !latin => "，".into(),
-            "." if !latin => "。".into(),
+            "," => "，".into(),
+            "." => "。".into(),
             KEY_SHIFT if self.shift == Shift::Locked => "⇪".into(),
             KEY_SHIFT => "⇧".into(),
             KEY_SPACE => self.mode.space_label().into(),
@@ -754,6 +937,10 @@ impl Keyboard {
             KEY_BACKSPACE => "⌫".into(),
             KEY_SYMBOLS => "?123".into(),
             KEY_LETTERS => "ABC".into(),
+            _ if self.kana_keys() && self.katakana && !self.symbols_mode => japanese::to_katakana(key),
+            _ if self.mode == Mode::Korean && self.shift != Shift::Off && !self.symbols_mode => {
+                HANGUL_SHIFTED.iter().find(|(plain, _)| *plain == key).map_or(key, |&(_, shifted)| shifted).into()
+            }
             _ => {
                 let mut chars = key.chars();
                 match (chars.next(), chars.next()) {
@@ -799,6 +986,16 @@ impl Keyboard {
                 self.symbols_page_two = false;
                 self.rebuild();
             }
+            KEY_KATAKANA => {
+                self.katakana = !self.katakana;
+                self.schedule_refresh(host);
+            }
+            KEY_DAKUTEN | KEY_HANDAKUTEN | KEY_SMALL if self.kana_keys() => {
+                if let Some(last) = self.composing.pop() {
+                    self.composing.push(modify_kana(last, key).unwrap_or(last));
+                }
+                self.schedule_refresh(host);
+            }
             _ => {
                 let label = self.label_for(key);
                 self.handle_text_key(&label, editor, host);
@@ -816,9 +1013,13 @@ impl Keyboard {
         if editor.connected() {
             self.finish_composing(editor, host);
         }
+        let height = self.height();
         self.mode = next;
         self.engines.preload(next);
         self.rebuild();
+        if self.height() != height {
+            host.request_layout();
+        }
         self.schedule_refresh(host);
     }
 
@@ -849,12 +1050,12 @@ impl Keyboard {
             self.shift = Shift::Off;
         }
         // The long-vowel mark continues the word being typed ("ra-men" is らーめん).
-        if self.mode == Mode::Japanese && ch == 'ー' && !self.composing.is_empty() {
+        if self.mode == Mode::Japanese && !self.native_keys() && ch == 'ー' && !self.composing.is_empty() {
             self.composing.push('-');
             self.schedule_refresh(host);
             return;
         }
-        if self.symbols_mode || !is_composing_char(ch) || chars.next().is_some() {
+        if self.symbols_mode || !self.is_composing_char(ch) || chars.next().is_some() {
             self.finish_composing(editor, host);
             editor.commit_text(value);
             return;
@@ -863,9 +1064,19 @@ impl Keyboard {
             self.composing.push(ch);
             editor.set_composing_text(&self.composing);
         } else {
-            self.composing.push(ch.to_ascii_lowercase());
+            // Kana are kept as hiragana; the katakana setting only changes what is shown.
+            self.composing.push(katakana_to_hiragana(ch.to_ascii_lowercase()));
         }
         self.schedule_refresh(host);
+    }
+
+    /// Whether a typed character belongs to the word being composed.
+    fn is_composing_char(&self, ch: char) -> bool {
+        match self.mode {
+            Mode::Japanese if self.native_keys() => ('ぁ'..='ゖ').contains(&ch) || ('ァ'..='ヶ').contains(&ch) || ch == 'ー',
+            Mode::Korean if self.native_keys() => korean::is_jamo_key(ch),
+            _ => ch.is_ascii_alphabetic() || ch == '\'',
+        }
     }
 
     fn handle_backspace(&mut self, editor: &mut dyn Editor, host: &mut dyn Host) {
@@ -900,7 +1111,8 @@ impl Keyboard {
             self.commit_latin_word(editor, host, true);
         } else if !self.composing.is_empty() {
             // Enter commits the letters as typed, like most CJK keyboards.
-            editor.commit_text(&self.composing);
+            let typed = if self.native_keys() { self.composing_preview() } else { self.composing.clone() };
+            editor.commit_text(&typed);
             self.clear_composing(host);
             return;
         }
@@ -935,7 +1147,7 @@ impl Keyboard {
     }
 
     fn commit_top_candidate(&mut self, editor: &mut dyn Editor, host: &mut dyn Host) {
-        let candidates = self.engines.candidates(self.mode, &self.composing, true).unwrap_or_default();
+        let candidates = self.fetch_candidates(true).unwrap_or_default();
         let text = candidates.into_iter().next().unwrap_or_else(|| self.composing.clone());
         editor.commit_text(&text);
         self.clear_composing(host);
@@ -981,7 +1193,7 @@ impl Keyboard {
             return;
         }
         self.seen_generation = generation;
-        match self.engines.candidates(self.mode, &self.composing, false) {
+        match self.fetch_candidates(false) {
             Some(candidates) => {
                 self.candidates = candidates;
                 self.candidates_dirty = false;
@@ -996,6 +1208,17 @@ impl Keyboard {
         }
     }
 
+    /// The engine's candidates; the katakana key puts the katakana spelling first.
+    fn fetch_candidates(&self, block: bool) -> Option<Vec<String>> {
+        let mut candidates = self.engines.candidates(self.mode, &self.composing, block)?;
+        if self.kana_keys() && self.katakana && !self.composing.is_empty() {
+            let katakana = self.composing_preview();
+            candidates.retain(|c| *c != katakana);
+            candidates.insert(0, katakana);
+        }
+        Some(candidates)
+    }
+
     fn shown(&self, candidate: &str) -> String {
         if self.mode.is_latin() {
             match_case(candidate, &self.composing, self.shift)
@@ -1007,7 +1230,9 @@ impl Keyboard {
     /// What the user has typed, shown left of the candidates (pinyin, kana, or Hangul).
     fn composing_preview(&self) -> String {
         match self.mode {
+            Mode::Japanese if self.kana_keys() && self.katakana => japanese::to_katakana(&self.composing),
             Mode::Japanese => japanese::to_hiragana(&self.composing, false),
+            Mode::Korean if self.composing.starts_with(korean::is_jamo_key) => korean::compose_keys(&self.composing),
             Mode::Korean => korean::compose(&self.composing).unwrap_or_else(|| self.composing.clone()),
             _ => self.composing.clone(),
         }
@@ -1180,13 +1405,13 @@ impl Keyboard {
             });
         }
         // Keys fill their row, so pick the nearest key in the touched row (margins included).
-        let row_height = self.dp(58.0);
+        let row_height = self.row_height();
         let area = self.keys_area();
         if y < area.top - self.dp(2.0) || y > area.bottom + self.dp(6.0) {
             return Target::Nothing;
         }
-        let row = (((y - area.top) / row_height).floor().max(0.0) as usize).min(3);
-        let row_top = area.top + row as f32 * row_height + self.dp(4.0);
+        let row = (((y - area.top) / row_height).floor().max(0.0) as usize).min(self.rows().len() - 1);
+        let row_top = area.top + row as f32 * row_height + self.key_gap();
         self.keys
             .iter()
             .enumerate()
@@ -1726,18 +1951,33 @@ impl Keyboard {
             } else if enter {
                 (self.sp(26.0), theme.accent_text)
             } else if function {
-                let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS);
-                (
-                    self.sp(if small { 15.0 } else { 20.0 }),
-                    if key.key == KEY_SHIFT && self.shift != Shift::Off { theme.accent } else { theme.text },
-                )
+                let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA);
+                let on = (key.key == KEY_SHIFT && self.shift != Shift::Off) || (key.key == KEY_KATAKANA && self.katakana);
+                (self.sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
+            } else if self.kana_keys() && !self.symbols_mode {
+                (self.sp(18.0), theme.text)
+            } else if self.native_keys() && !self.symbols_mode {
+                (self.sp(19.0), theme.text)
             } else {
                 (self.sp(21.0), theme.text)
             };
             let cap = Rect { bottom: key.rect.bottom - self.dp(1.5), ..key.rect };
             let label = self.label_for(key.key);
-            let label = self.fit(canvas, &label, size, false, cap.width() - self.dp(4.0), false);
-            self.centered_text(canvas, &label, cap, size, color, false);
+            let sound = if self.native_keys() && !self.symbols_mode { romanization(&label) } else { None };
+            let fitted = self.fit(canvas, &label, size, false, cap.width() - self.dp(4.0), false);
+            match sound {
+                // The kana or jamo, with its sound in small letters underneath.
+                Some(sound) => {
+                    // Starts a little lower, leaving the corner for a long-press digit.
+                    let split = cap.top + cap.height() * 0.62;
+                    let top = if key.hint.is_some() { cap.top + self.dp(8.0) } else { cap.top + self.dp(2.0) };
+                    self.centered_text(canvas, &fitted, Rect { top, bottom: split + self.dp(2.0), ..cap }, size, color, false);
+                    let small = self.sp(if self.kana_keys() { 9.0 } else { 10.0 });
+                    let below = Rect { top: split - self.dp(2.0), bottom: cap.bottom - self.dp(2.0), ..cap };
+                    self.centered_text(canvas, sound, below, small, theme.text_muted, false);
+                }
+                None => self.centered_text(canvas, &fitted, cap, size, color, false),
+            }
             if let Some(hint) = key.hint {
                 let size = self.sp(10.0);
                 let style = TextStyle { size, color: theme.text_muted, bold: false, align: Align::Right };
@@ -1845,6 +2085,7 @@ mod tests {
         }
         fn cancel_timer(&mut self) {}
         fn invalidate(&mut self) {}
+        fn request_layout(&mut self) {}
     }
 
     /// Every character is 10px wide.
@@ -1967,10 +2208,11 @@ mod tests {
     }
 
     #[test]
-    fn japanese_long_vowel_key() {
+    fn japanese_long_vowel_key_in_romaji() {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
+        kb.apply_settings(Settings { romaji_keys: true, ..Settings::default() });
         kb.engines.japanese(true);
         kb.set_mode(Mode::Japanese, &mut editor, &mut host);
         type_text(&mut kb, "ra", &mut editor);
@@ -2005,6 +2247,79 @@ mod tests {
         assert_eq!(editor.text, "我爱你");
         tap_key(&mut kb, ",", &mut editor);
         assert_eq!(editor.text, "我爱你，");
+    }
+
+    #[test]
+    fn kana_keyboard() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.engines.japanese(true);
+        let height = kb.height();
+        kb.set_mode(Mode::Japanese, &mut editor, &mut host);
+        assert!(kb.height() > height, "six rows of keys");
+        assert_eq!(kb.keys.len(), KANA.iter().map(|row| row.len()).sum::<usize>());
+        assert_eq!(romanization("し"), Some("shi"));
+        // に ほ ゛ ん: the ゛ key voices the kana before it.
+        for key in ["に", "ほ", KEY_DAKUTEN, "ん"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        assert_eq!(kb.composing_preview(), "にぼん");
+        tap_key(&mut kb, KEY_DAKUTEN, &mut editor); // nothing to voice on ん
+        tap_key(&mut kb, KEY_BACKSPACE, &mut editor);
+        tap_key(&mut kb, KEY_DAKUTEN, &mut editor); // ぼ back to ほ
+        tap_key(&mut kb, "ん", &mut editor);
+        assert_eq!(kb.composing_preview(), "にほん");
+        kb.refresh_candidates();
+        assert_eq!(kb.candidates.first().map(String::as_str), Some("日本"));
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "日本");
+        // Katakana: ら ー め ん, with the katakana spelling first.
+        tap_key(&mut kb, KEY_KATAKANA, &mut editor);
+        assert_eq!(kb.label_for("ら"), "ラ");
+        for key in ["ら", "ー", "め", "ん"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        assert_eq!(kb.composing_preview(), "ラーメン");
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "日本ラーメン");
+        // 小 makes the kana small: き ゆ 小 → きゅ.
+        tap_key(&mut kb, KEY_KATAKANA, &mut editor);
+        for key in ["き", "ゆ", KEY_SMALL] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        tap_key(&mut kb, KEY_ENTER, &mut editor);
+        assert_eq!(editor.text, "日本ラーメンきゅ");
+        kb.set_mode(Mode::English, &mut editor, &mut host);
+        assert_eq!(kb.height(), height);
+    }
+
+    #[test]
+    fn hangul_keyboard() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.engines.korean(true);
+        kb.set_mode(Mode::Korean, &mut editor, &mut host);
+        assert_eq!(kb.rows(), &HANGUL);
+        assert_eq!(romanization("ㅓ"), Some("eo"));
+        for key in ["ㅎ", "ㅏ", "ㄴ", "ㄱ", "ㅜ", "ㄱ"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        assert_eq!(kb.composing_preview(), "한국");
+        kb.refresh_candidates();
+        assert_eq!(kb.candidates.first().map(String::as_str), Some("한국"));
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        // Shift types the doubled consonant once: ㄲ ㅗ ㅊ.
+        tap_key(&mut kb, KEY_SHIFT, &mut editor);
+        assert_eq!(kb.label_for("ㄱ"), "ㄲ");
+        for key in ["ㄱ", "ㅗ", "ㅊ"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        tap_key(&mut kb, KEY_ENTER, &mut editor);
+        tap_key(&mut kb, ".", &mut editor);
+        assert_eq!(editor.text, "한국 꽃.");
     }
 
     #[test]

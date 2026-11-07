@@ -597,6 +597,10 @@ impl Host for AndroidHost {
     fn invalidate(&mut self) {
         let _ = self.env.call(self.view, "invalidate", "()V", &[]);
     }
+
+    fn request_layout(&mut self) {
+        let _ = self.env.call(self.view, "requestLayout", "()V", &[]);
+    }
 }
 
 // ------------------------------------------------------------------ canvas ----

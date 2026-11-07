@@ -145,6 +145,28 @@ fn korean_words_and_syllables() {
 }
 
 #[test]
+fn hangul_keys() {
+    let korean = &all().korean;
+    assert_eq!(korean::compose_keys("ㅎㅏㄴㄱㅜㄱ"), "한국");
+    assert_eq!(korean::compose_keys("ㄱㅏㄱㅏ"), "가가", "the final moves to the next syllable");
+    assert_eq!(korean::compose_keys("ㄷㅏㄹㄱ"), "닭");
+    assert_eq!(korean::compose_keys("ㄷㅏㄹㄱㅏ"), "달가", "only the second key of ㄺ moves");
+    assert_eq!(korean::compose_keys("ㄱㅗㅏ"), "과");
+    assert_eq!(korean::compose_keys("ㅃㅏㄸ"), "빠ㄸ", "ㄸ cannot end a syllable");
+    assert_eq!(korean::compose_keys("ㅏㅋ"), "ㅏㅋ");
+    for word in ["안녕하세요", "감사합니다", "왜", "닭고기", "읽었어요", "괜찮아"] {
+        let keys = korean::decompose_keys(word).unwrap();
+        assert_eq!(korean::compose_keys(&keys), word, "keys {keys}");
+    }
+    assert_first("감사", korean.key_candidates("ㄱㅏㅁㅅㅏ"));
+    assert_contains("감사합니다", korean.key_candidates("ㄱㅏㅁㅅㅏㅎㅏ"));
+    assert_contains("안녕하세요", korean.key_candidates("ㅇㅏㄴㄴㅕㅇ"));
+    let candidates = korean.key_candidates("ㅎㅏㄴㄱㅜ");
+    assert_first("한구", candidates.clone());
+    assert!(candidates.iter().skip(1).all(|w| korean::decompose_keys(w).unwrap().starts_with("ㅎㅏㄴㄱㅜ")), "{candidates:?}");
+}
+
+#[test]
 fn edit_distance_prefers_neighbouring_keys() {
     assert_eq!(engines::latin::distance("teh", "the", 2.0), 0.8);
     assert_eq!(engines::latin::distance("cat", "cap", 2.0), 1.0);

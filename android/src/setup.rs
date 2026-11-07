@@ -32,6 +32,7 @@ fn switches() -> Vec<(String, String, bool)> {
         "auto_space_toggle",
         "grammar_button_toggle",
         "normal_space_toggle",
+        "romaji_keys_toggle",
     ]
     .iter()
     .zip(prefs::SWITCHES)

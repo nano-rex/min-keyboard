@@ -16,8 +16,8 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
 | English | Completions ranked by frequency, typo correction (`teh` → the, `recieve` → receive), contractions (`dont` → don't), shortcuts (`wdym`) | ~74,000 words |
 | Malay | Completions and typo correction (`bagaimna` → bagaimana) | ~50,000 words |
 | Chinese (简/繁) | Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
-| Japanese | Romaji → hiragana/katakana with kanji conversion (`nihon` → 日本, `watashi` → 私), a ー key for long vowels (`ra`ー`men` → ラーメン) | 131,000 readings (SKK) |
-| Korean | Romanization → Hangul words (`gamsahamnida` → 감사합니다) with syllable-by-syllable fallback | 97,000 keys |
+| Japanese | Kana keys in gojūon order, each with its romaji underneath, with ゛ ゜ 小 ー keys and a hiragana/katakana switch; kanji conversion (にほん → 日本). Romaji on the ABC keys is a setting (`nihon` → 日本) | 131,000 readings (SKK) |
+| Korean | Two-set (Dubeolsik) Hangul keys, each with its romanization underneath, composed into syllables, with word completions. Romanization on the ABC keys is a setting (`gamsahamnida` → 감사합니다) | 97,000 keys |
 
 - **Look and feel.** Rounded keys with depth, light, dark or system theme, key previews, haptic
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
