@@ -31,7 +31,8 @@
     <string name="romanize_selection">Show the pinyin, romaji or romanization of selected Chinese, Japanese and Korean text</string>
     <string name="normal_space">Space types a normal space, not the wide 　</string>
     <string name="keyboard_on">Keyboard</string>
-    <string name="keyboard_pinyin">Keyboard (pinyin)</string>
+    <string name="keyboard_pinyin">Pinyin keyboard (type on the ABC keys)</string>
+    <string name="keyboard_bopomofo">Bopomofo keyboard (ㄅㄆㄇㄈ keys)</string>
     <string name="keyboard_kana">Kana keyboard (あいうえお keys)</string>
     <string name="keyboard_romaji">Romaji keyboard (type on the ABC keys)</string>
     <string name="keyboard_hangul">Hangul keyboard (ㅂㅈㄷㄱ keys)</string>

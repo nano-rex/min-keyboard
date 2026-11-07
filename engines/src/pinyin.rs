@@ -116,15 +116,55 @@ impl PinyinEngine {
             if piece.is_empty() {
                 continue;
             }
-            let (count, text) = self.segment(piece, mode, p == pieces.len() - 1)?;
+            let (count, text) = self.segment(piece, mode, p == pieces.len() - 1, None)?;
             result.push_str(&text);
             segments += count;
         }
         ((segments >= 2 || input.contains('\'')) && !result.is_empty()).then_some(result)
     }
 
+    /// Candidates for pinyin typed syllable by syllable, as the Bopomofo keyboard does: words may
+    /// span several syllables but never split one.
+    pub fn syllable_candidates(&self, syllables: &[String], mode: ScriptMode) -> Vec<String> {
+        let compact = syllables.concat();
+        if compact.is_empty() {
+            return Vec::new();
+        }
+        let mut cuts = vec![false; compact.len() + 1];
+        let mut at = 0;
+        cuts[0] = true;
+        for syllable in syllables {
+            at += syllable.len();
+            cuts[at] = true;
+        }
+        let mut results = Candidates::default();
+        let exact = self.lexicon.get(&compact);
+        if exact.is_none() {
+            if let Some((count, text)) = self.segment(&compact, mode, true, Some(&cuts)) {
+                if count >= 2 {
+                    results.add(&text);
+                }
+            }
+        }
+        if let Some(exact) = exact {
+            add_all(&mut results, exact.candidates(mode));
+        }
+        for (_, entry) in prefixed(&self.lexicon, &compact, &compact) {
+            if results.len() >= MAX_CANDIDATES {
+                break;
+            }
+            add_all(&mut results, entry.candidates(mode));
+        }
+        // The first syllable on its own, so long input can be typed piece by piece.
+        if let Some(first) = self.lexicon.get(&syllables[0]).and_then(|entry| top(entry, mode)) {
+            results.add(first);
+        }
+        results.into_vec(MAX_CANDIDATES)
+    }
+
     /// The cheapest split of one apostrophe-free piece: (word count, joined top candidates).
-    fn segment(&self, piece: &str, mode: ScriptMode, allow_prefix_at_end: bool) -> Option<(usize, String)> {
+    /// With `cuts`, words may only start and end where it is true.
+    fn segment(&self, piece: &str, mode: ScriptMode, allow_prefix_at_end: bool, cuts: Option<&[bool]>) -> Option<(usize, String)> {
         // Normalized input is ASCII, so byte offsets are character offsets.
         let n = piece.len();
         let mut best = vec![f64::MAX; n + 1];
@@ -137,6 +177,9 @@ impl PinyinEngine {
                 continue;
             }
             for j in i + 1..=n.min(i + MAX_KEY_LENGTH) {
+                if cuts.is_some_and(|cuts| !cuts[j]) {
+                    continue;
+                }
                 let key = &piece[i..j];
                 let mut entry = self.lexicon.get(key);
                 if entry.is_none() && j == n && allow_prefix_at_end {
@@ -204,6 +247,159 @@ fn add_all(results: &mut Candidates, candidates: &[String]) {
             results.add(candidate);
         }
     }
+}
+
+// ---------------------------------------------------------------- Bopomofo ----
+
+/// Whether a key belongs to the Bopomofo (Zhuyin) keyboard: a symbol or a tone mark.
+pub fn is_bopomofo_key(c: char) -> bool {
+    ('ㄅ'..='ㄩ').contains(&c) || is_tone_mark(c)
+}
+
+fn is_tone_mark(c: char) -> bool {
+    matches!(c, 'ˊ' | 'ˇ' | 'ˋ' | '˙')
+}
+
+/// The pinyin each Bopomofo initial stands for.
+fn initial(c: char) -> Option<&'static str> {
+    Some(match c {
+        'ㄅ' => "b",
+        'ㄆ' => "p",
+        'ㄇ' => "m",
+        'ㄈ' => "f",
+        'ㄉ' => "d",
+        'ㄊ' => "t",
+        'ㄋ' => "n",
+        'ㄌ' => "l",
+        'ㄍ' => "g",
+        'ㄎ' => "k",
+        'ㄏ' => "h",
+        'ㄐ' => "j",
+        'ㄑ' => "q",
+        'ㄒ' => "x",
+        'ㄓ' => "zh",
+        'ㄔ' => "ch",
+        'ㄕ' => "sh",
+        'ㄖ' => "r",
+        'ㄗ' => "z",
+        'ㄘ' => "c",
+        'ㄙ' => "s",
+        _ => return None,
+    })
+}
+
+fn is_medial(c: char) -> bool {
+    matches!(c, 'ㄧ' | 'ㄨ' | 'ㄩ')
+}
+
+/// Spells one Bopomofo syllable in pinyin, with ü as v: ㄐㄩㄢ is "juan", ㄨㄟ is "wei", ㄓ is "zhi".
+fn syllable(lead: Option<&str>, medial: Option<char>, fin: Option<char>) -> String {
+    let rhyme = |c: char| match c {
+        'ㄚ' => "a",
+        'ㄛ' => "o",
+        'ㄜ' | 'ㄝ' => "e",
+        'ㄞ' => "ai",
+        'ㄟ' => "ei",
+        'ㄠ' => "ao",
+        'ㄡ' => "ou",
+        'ㄢ' => "an",
+        'ㄣ' => "en",
+        'ㄤ' => "ang",
+        'ㄥ' => "eng",
+        _ => "er",
+    };
+    let initial = lead.unwrap_or("");
+    let ending = match (medial, fin) {
+        (None, None) if matches!(initial, "zh" | "ch" | "sh" | "r" | "z" | "c" | "s") => "i".to_string(),
+        (None, None) => String::new(),
+        (None, Some(f)) => rhyme(f).to_string(),
+        (Some('ㄧ'), f) => match (f, lead.is_some()) {
+            (None, false) => "yi".into(),
+            (Some('ㄣ'), false) => "yin".into(),
+            (Some('ㄥ'), false) => "ying".into(),
+            (Some('ㄡ'), true) => "iu".into(),
+            (None, true) => "i".into(),
+            (Some('ㄣ'), true) => "in".into(),
+            (Some('ㄥ'), true) => "ing".into(),
+            (Some(f), with_initial) => {
+                let rhyme = match f {
+                    'ㄝ' => "e",
+                    'ㄡ' => "ou",
+                    f => rhyme(f),
+                };
+                if with_initial {
+                    format!("i{rhyme}")
+                } else {
+                    format!("y{rhyme}")
+                }
+            }
+        },
+        (Some('ㄨ'), f) => match (f, lead.is_some()) {
+            (None, false) => "wu".into(),
+            (None, true) => "u".into(),
+            (Some('ㄟ'), true) => "ui".into(),
+            (Some('ㄣ'), true) => "un".into(),
+            (Some('ㄥ'), true) => "ong".into(),
+            (Some(f), with_initial) => format!("{}{}", if with_initial { "u" } else { "w" }, rhyme(f)),
+        },
+        // ㄩ is u after j, q and x, v (ü) after n and l, and yu with no initial.
+        (Some(_), f) => {
+            let rest = match f {
+                None => "",
+                Some('ㄝ') => "e",
+                Some('ㄢ') => "an",
+                Some('ㄣ') => "n",
+                Some('ㄥ') => {
+                    return format!("{}{}", if lead.is_some() { initial } else { "y" }, if lead.is_some() { "iong" } else { "ong" })
+                }
+                Some(f) => rhyme(f),
+            };
+            let vowel = match initial {
+                "" => "yu",
+                "n" | "l" => "v",
+                _ => "u",
+            };
+            return format!("{initial}{vowel}{rest}");
+        }
+    };
+    format!("{initial}{ending}")
+}
+
+/// Turns Bopomofo keys into pinyin with an apostrophe between syllables: "ㄋㄧˇㄏㄠˇ" is "ni'hao".
+pub fn bopomofo_to_pinyin(keys: &str) -> String {
+    bopomofo_syllables(keys).join("'")
+}
+
+/// The pinyin syllables of Bopomofo keys. A tone mark ends a syllable; so does a key that
+/// cannot continue it.
+pub fn bopomofo_syllables(keys: &str) -> Vec<String> {
+    let mut syllables: Vec<String> = Vec::new();
+    let (mut lead, mut medial, mut fin): (Option<&str>, Option<char>, Option<char>) = (None, None, None);
+    let mut flush = |lead: &mut Option<&str>, medial: &mut Option<char>, fin: &mut Option<char>| {
+        if lead.is_some() || medial.is_some() || fin.is_some() {
+            syllables.push(syllable(lead.take(), medial.take(), fin.take()));
+        }
+    };
+    for c in keys.chars() {
+        if is_tone_mark(c) {
+            flush(&mut lead, &mut medial, &mut fin);
+        } else if let Some(i) = initial(c) {
+            flush(&mut lead, &mut medial, &mut fin);
+            lead = Some(i);
+        } else if is_medial(c) {
+            if medial.is_some() || fin.is_some() {
+                flush(&mut lead, &mut medial, &mut fin);
+            }
+            medial = Some(c);
+        } else if ('ㄚ'..='ㄦ').contains(&c) {
+            if fin.is_some() {
+                flush(&mut lead, &mut medial, &mut fin);
+            }
+            fin = Some(c);
+        }
+    }
+    flush(&mut lead, &mut medial, &mut fin);
+    syllables
 }
 
 /// Lower-cases and keeps letters and apostrophes; ü is typed as v.

@@ -99,6 +99,7 @@
 
             <TextView style="@style/SectionTitle" android:text="@string/language_chinese" />
             <Switch android:id="@+id/language_chinese_toggle" style="@style/SettingSwitch" android:text="@string/keyboard_pinyin" />
+            <Switch android:id="@+id/language_chinese_bopomofo_toggle" style="@style/SettingSwitch" android:text="@string/keyboard_bopomofo" />
             <Switch android:id="@+id/chinese_traditional_toggle" style="@style/SettingSwitch" android:text="@string/chinese_traditional" />
             <Switch android:id="@+id/normal_space_chinese_toggle" style="@style/SettingSwitch" android:text="@string/normal_space" />
 

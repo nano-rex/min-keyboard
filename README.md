@@ -15,7 +15,7 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
 | --- | --- | --- |
 | English | Completions ranked by frequency, typo correction (`teh` → the, `recieve` → receive), contractions (`dont` → don't), shortcuts (`wdym`) | ~74,000 words |
 | Malay | Completions and typo correction (`bagaimna` → bagaimana) | ~50,000 words |
-| Chinese (简/繁) | One keyboard for Simplified and Traditional characters, with a 简⇄繁 key. Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
+| Chinese (简/繁) | One keyboard for Simplified and Traditional characters, with a 简⇄繁 key, typed in pinyin or on a separate Bopomofo (Zhuyin) keyboard that shows each symbol's pinyin underneath (ㄋㄧˇㄏㄠˇ → 你好). Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
 | Japanese | Kana keys in gojūon order, each with its romaji underneath, with ゛ ゜ 小 keys that switch the keys to voiced, p- and small kana (for one kana, or until tapped again after a double tap), a ー key and a hiragana/katakana switch; kanji conversion (にほん → 日本). A separate romaji keyboard types on the ABC keys (`nihon` → 日本) | 131,000 readings (SKK) |
 | Korean | Two-set (Dubeolsik) Hangul keys, each with its romanization underneath, composed into syllables, with word completions. A separate romanized keyboard types on the ABC keys (`gamsahamnida` → 감사합니다) | 97,000 keys |
 

@@ -111,6 +111,30 @@ fn pinyin_segments_sentences() {
 }
 
 #[test]
+fn bopomofo() {
+    use engines::pinyin::bopomofo_to_pinyin as p;
+    assert_eq!(p("ㄋㄧˇㄏㄠˇ"), "ni'hao");
+    assert_eq!(p("ㄓㄨㄥㄍㄨㄛˊ"), "zhong'guo");
+    assert_eq!(p("ㄐㄩㄢ"), "juan");
+    assert_eq!(p("ㄌㄩˋㄋㄩˇ"), "lv'nv");
+    assert_eq!(p("ㄩㄝˋㄩㄣˊㄩㄥˇ"), "yue'yun'yong");
+    assert_eq!(p("ㄒㄩㄥ"), "xiong");
+    assert_eq!(p("ㄧㄡˇㄧˋㄧㄣ"), "you'yi'yin");
+    assert_eq!(p("ㄌㄧㄡˊㄉㄨㄟˋㄏㄨㄣ"), "liu'dui'hun");
+    assert_eq!(p("ㄨㄛˇㄨㄟˋ"), "wo'wei");
+    assert_eq!(p("ㄓㄕˋㄗ˙"), "zhi'shi'zi");
+    assert_eq!(p("ㄦˊ"), "er");
+    assert_eq!(p("ㄨㄛˇㄞˋㄋㄧˇ"), "wo'ai'ni");
+    assert_eq!(p("ㄋㄧˇㄏ"), "ni'h", "an unfinished syllable is completed by the lexicon");
+    let pinyin = &all().pinyin;
+    let words = |keys: &str, mode| pinyin.syllable_candidates(&engines::pinyin::bopomofo_syllables(keys), mode);
+    assert_first("你好", words("ㄋㄧˇㄏㄠˇ", ScriptMode::Simplified));
+    assert_first("中國", words("ㄓㄨㄥㄍㄨㄛˊ", ScriptMode::Traditional));
+    assert_first("我爱你", words("ㄨㄛˇㄞˋㄋㄧˇ", ScriptMode::Simplified));
+    assert_first("今天天气很好", words("ㄐㄧㄣㄊㄧㄢㄊㄧㄢㄑㄧˋㄏㄣˇㄏㄠˇ", ScriptMode::Simplified));
+}
+
+#[test]
 fn romaji_to_kana() {
     assert_eq!(japanese::to_hiragana("konnichiha", true), "こんにちは");
     assert_eq!(japanese::to_hiragana("kitte", true), "きって");

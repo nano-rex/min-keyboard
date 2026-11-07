@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use engines::readings::{self, ReadingTable, Script};
-use engines::{japanese, korean, Assets, JapaneseEngine, KoreanEngine, LatinEngine, PinyinEngine, ScriptMode};
+use engines::{japanese, korean, pinyin, Assets, JapaneseEngine, KoreanEngine, LatinEngine, PinyinEngine, ScriptMode};
 use grammar::{Change, Language, Update};
 
 use crate::theme::{self, Theme};
@@ -115,6 +115,8 @@ pub trait Canvas {
 pub enum Mode {
     /// Pinyin, in Simplified or Traditional characters (the 简⇄繁 key switches).
     Chinese,
+    /// Chinese on Bopomofo (Zhuyin) keys.
+    ChineseBopomofo,
     /// Japanese on kana keys.
     Japanese,
     /// Japanese typed in romaji on the ABC keys.
@@ -128,12 +130,24 @@ pub enum Mode {
 }
 
 /// Every keyboard, in the order the language key goes through them.
-pub const MODES: [Mode; 7] =
-    [Mode::Chinese, Mode::Japanese, Mode::JapaneseRomaji, Mode::Korean, Mode::KoreanRomaji, Mode::English, Mode::Malay];
+pub const MODES: [Mode; 8] = [
+    Mode::Chinese,
+    Mode::ChineseBopomofo,
+    Mode::Japanese,
+    Mode::JapaneseRomaji,
+    Mode::Korean,
+    Mode::KoreanRomaji,
+    Mode::English,
+    Mode::Malay,
+];
 
 impl Mode {
     pub fn is_latin(self) -> bool {
         matches!(self, Mode::English | Mode::Malay)
+    }
+
+    pub fn is_chinese(self) -> bool {
+        matches!(self, Mode::Chinese | Mode::ChineseBopomofo)
     }
 
     pub fn is_japanese(self) -> bool {
@@ -144,15 +158,16 @@ impl Mode {
         matches!(self, Mode::Korean | Mode::KoreanRomaji)
     }
 
-    /// The romaji and romanized keyboards are off until turned on in Settings.
+    /// The Bopomofo, romaji and romanized keyboards are off until turned on in Settings.
     pub fn on_by_default(self) -> bool {
-        !matches!(self, Mode::JapaneseRomaji | Mode::KoreanRomaji)
+        !matches!(self, Mode::ChineseBopomofo | Mode::JapaneseRomaji | Mode::KoreanRomaji)
     }
 
     /// The preference name used by the settings screen.
     pub fn language_key(self) -> &'static str {
         match self {
             Mode::Chinese => "chinese",
+            Mode::ChineseBopomofo => "chinese_bopomofo",
             Mode::Japanese => "japanese",
             Mode::JapaneseRomaji => "japanese_romaji",
             Mode::Korean => "korean",
@@ -171,6 +186,7 @@ impl Mode {
             Mode::Korean => "한",
             Mode::KoreanRomaji => "Ko",
             Mode::Chinese => "中",
+            Mode::ChineseBopomofo => "注",
         }
     }
 
@@ -178,6 +194,7 @@ impl Mode {
         match self {
             Mode::Malay => "Bahasa Melayu",
             Mode::Chinese => "简体中文",
+            Mode::ChineseBopomofo => "注音 · 简体",
             Mode::Japanese => "日本語",
             Mode::JapaneseRomaji => "日本語 · romaji",
             Mode::Korean => "한국어",
@@ -249,7 +266,7 @@ impl Settings {
     /// Whether space types " " rather than the full-width U+3000 (Korean always uses " ").
     fn normal_space(&self, mode: Mode) -> bool {
         match mode {
-            Mode::Chinese => self.normal_space_chinese,
+            Mode::Chinese | Mode::ChineseBopomofo => self.normal_space_chinese,
             Mode::Japanese | Mode::JapaneseRomaji => self.normal_space_japanese,
             _ => true,
         }
@@ -364,7 +381,7 @@ impl Engines {
         match mode {
             Mode::English => self.english.get().is_some(),
             Mode::Malay => self.malay.get().is_some(),
-            Mode::Chinese => self.pinyin.get().is_some(),
+            Mode::Chinese | Mode::ChineseBopomofo => self.pinyin.get().is_some(),
             Mode::Japanese | Mode::JapaneseRomaji => self.japanese.get().is_some(),
             Mode::Korean | Mode::KoreanRomaji => self.korean.get().is_some(),
         }
@@ -378,7 +395,7 @@ impl Engines {
         let engines = Arc::clone(self);
         let spawned = std::thread::Builder::new().name("min-keyboard-dictionary".into()).spawn(move || {
             match mode {
-                Mode::Chinese => _ = engines.pinyin(true),
+                Mode::Chinese | Mode::ChineseBopomofo => _ = engines.pinyin(true),
                 Mode::Japanese | Mode::JapaneseRomaji => _ = engines.japanese(true),
                 Mode::Korean | Mode::KoreanRomaji => _ = engines.korean(true),
                 Mode::English | Mode::Malay => _ = engines.latin(mode, true),
@@ -402,6 +419,7 @@ impl Engines {
             Mode::Korean => self.korean(block)?.key_candidates(input),
             Mode::KoreanRomaji => self.korean(block)?.candidates(input),
             Mode::Chinese => self.pinyin(block)?.candidates(input, script),
+            Mode::ChineseBopomofo => self.pinyin(block)?.syllable_candidates(&pinyin::bopomofo_syllables(input), script),
         })
     }
 
@@ -441,6 +459,15 @@ const KEY_SMALL: &str = "小";
 const KEY_KATAKANA: &str = "あ⇄ア";
 /// Switches Chinese between Simplified and Traditional characters.
 const KEY_SCRIPT: &str = "简⇄繁";
+
+/// Bopomofo (Zhuyin) in the usual Dachen order, with the tone marks ˊ ˇ ˋ ˙ in the top row.
+const BOPOMOFO: [&[&str]; 5] = [
+    &["ㄅ", "ㄉ", "ˇ", "ˋ", "ㄓ", "ˊ", "˙", "ㄚ", "ㄞ", "ㄢ", "ㄦ"],
+    &["ㄆ", "ㄊ", "ㄍ", "ㄐ", "ㄔ", "ㄗ", "ㄧ", "ㄛ", "ㄟ", "ㄣ", KEY_BACKSPACE],
+    &["ㄇ", "ㄋ", "ㄎ", "ㄑ", "ㄕ", "ㄘ", "ㄨ", "ㄜ", "ㄠ", "ㄤ", "，"],
+    &["ㄈ", "ㄌ", "ㄏ", "ㄒ", "ㄖ", "ㄙ", "ㄩ", "ㄝ", "ㄡ", "ㄥ", "。"],
+    &[KEY_SYMBOLS, KEY_SCRIPT, KEY_SPACE, KEY_ENTER],
+];
 
 /// Japanese kana in gojūon order: one consonant per column, the vowels a i u e o down the rows.
 const KANA: [&[&str]; 6] = [
@@ -550,6 +577,48 @@ fn romanization(label: &str) -> Option<&'static str> {
         "ゅ" => "yu",
         "ょ" => "yo",
         "ゎ" => "wa",
+        "ㄅ" => "b",
+        "ㄆ" => "p",
+        "ㄇ" => "m",
+        "ㄈ" => "f",
+        "ㄉ" => "d",
+        "ㄊ" => "t",
+        "ㄋ" => "n",
+        "ㄌ" => "l",
+        "ㄍ" => "g",
+        "ㄎ" => "k",
+        "ㄏ" => "h",
+        "ㄐ" => "j",
+        "ㄑ" => "q",
+        "ㄒ" => "x",
+        "ㄓ" => "zh",
+        "ㄔ" => "ch",
+        "ㄕ" => "sh",
+        "ㄖ" => "r",
+        "ㄗ" => "z",
+        "ㄘ" => "c",
+        "ㄙ" => "s",
+        "ㄧ" => "i",
+        "ㄨ" => "u",
+        "ㄩ" => "ü",
+        "ㄚ" => "a",
+        "ㄛ" => "o",
+        "ㄜ" => "e",
+        "ㄝ" => "ê",
+        "ㄞ" => "ai",
+        "ㄟ" => "ei",
+        "ㄠ" => "ao",
+        "ㄡ" => "ou",
+        "ㄢ" => "an",
+        "ㄣ" => "en",
+        "ㄤ" => "ang",
+        "ㄥ" => "eng",
+        "ㄦ" => "er",
+        // The tones, shown on a.
+        "ˊ" => "á",
+        "ˇ" => "ǎ",
+        "ˋ" => "à",
+        "˙" => "a",
         "ㅂ" => "b",
         "ㅈ" => "j",
         "ㄷ" => "d",
@@ -1001,9 +1070,9 @@ impl Keyboard {
         self.dp(4.0 + 44.0 + 2.0 + 6.0) + self.keys_height()
     }
 
-    /// The Japanese and Korean keyboards with kana and Hangul keys (not the romaji ones).
+    /// The keyboards with Bopomofo, kana and Hangul keys, which show each key's sound.
     fn native_keys(&self) -> bool {
-        matches!(self.mode, Mode::Japanese | Mode::Korean)
+        matches!(self.mode, Mode::ChineseBopomofo | Mode::Japanese | Mode::Korean)
     }
 
     /// The kana keyboard has six rows of keys, so it is taller (its symbol pages too).
@@ -1012,7 +1081,11 @@ impl Keyboard {
     }
 
     fn keys_height(&self) -> f32 {
-        self.dp(if self.kana_keys() { 6.0 * 46.0 } else { 4.0 * 58.0 })
+        self.dp(match self.mode {
+            Mode::Japanese => 6.0 * 46.0,
+            Mode::ChineseBopomofo => 5.0 * 48.0,
+            _ => 4.0 * 58.0,
+        })
     }
 
     fn row_height(&self) -> f32 {
@@ -1047,6 +1120,7 @@ impl Keyboard {
             (false, _, _) if self.mode == Mode::Korean => &HANGUL,
             (false, _, _) if self.mode == Mode::JapaneseRomaji => &QWERTY_JAPANESE,
             (false, _, _) if self.mode == Mode::Chinese => &QWERTY_CHINESE,
+            (false, _, _) if self.mode == Mode::ChineseBopomofo => &BOPOMOFO,
             (false, _, _) => &QWERTY,
             (true, true, false) => &EN_SYMBOLS,
             (true, true, true) => &EN_SYMBOLS_2,
@@ -1091,6 +1165,7 @@ impl Keyboard {
             KEY_SHIFT if self.shift == Shift::Locked => "⇪".into(),
             KEY_SHIFT => "⇧".into(),
             KEY_SPACE if self.mode == Mode::Chinese && self.script == ScriptMode::Traditional => "繁體中文".into(),
+            KEY_SPACE if self.mode == Mode::ChineseBopomofo && self.script == ScriptMode::Traditional => "注音 · 繁體".into(),
             KEY_SPACE => self.mode.space_label().into(),
             KEY_ENTER => "↵".into(),
             KEY_BACKSPACE => "⌫".into(),
@@ -1260,6 +1335,7 @@ impl Keyboard {
     /// Whether a typed character belongs to the word being composed.
     fn is_composing_char(&self, ch: char) -> bool {
         match self.mode {
+            Mode::ChineseBopomofo => pinyin::is_bopomofo_key(ch),
             Mode::Japanese => ('ぁ'..='ゖ').contains(&ch) || ('ァ'..='ヶ').contains(&ch) || ch == 'ー',
             Mode::Korean => korean::is_jamo_key(ch),
             _ => ch.is_ascii_alphabetic() || ch == '\'',
@@ -1913,7 +1989,7 @@ impl Keyboard {
         self.grammar_requests += 1;
         let request = self.grammar_requests;
         let mut language = grammar::detect_language(&text, self.mode == Mode::Malay);
-        let chinese_mode = self.mode == Mode::Chinese;
+        let chinese_mode = self.mode.is_chinese();
         if chinese_mode && text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
             language = Language::Mandarin;
         }
@@ -2221,7 +2297,7 @@ impl Keyboard {
                     || (key.key == KEY_SCRIPT && self.script == ScriptMode::Traditional)
                     || modifier.is_some();
                 (self.sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
-            } else if self.kana_keys() && !self.symbols_mode {
+            } else if (self.kana_keys() || self.mode == Mode::ChineseBopomofo) && !self.symbols_mode {
                 // While ゛, ゜ or 小 is on, kana without that form are dimmed (they still type).
                 let unchanged = self.kana_modifier.is_some_and(|(m, _)| {
                     let mut chars = key.key.chars();
@@ -2239,6 +2315,11 @@ impl Keyboard {
             let cap = Rect { bottom: key.rect.bottom - self.dp(1.5), ..key.rect };
             let label = self.label_for(key.key);
             let sound = if self.native_keys() && !self.symbols_mode && !function { romanization(&label) } else { None };
+            // A function key's label shrinks to fit rather than being cut short (简⇄繁 on a narrow key).
+            let mut size = size;
+            while function && size > self.sp(10.0) && canvas.measure(&label, size, false) > cap.width() - self.dp(8.0) {
+                size -= self.sp(1.0);
+            }
             let fitted = self.fit(canvas, &label, size, false, cap.width() - self.dp(4.0), false);
             match sound {
                 // The kana or jamo, with its sound in small letters underneath.
@@ -2247,7 +2328,7 @@ impl Keyboard {
                     let split = cap.top + cap.height() * 0.62;
                     let top = if key.hint.is_some() { cap.top + self.dp(8.0) } else { cap.top + self.dp(2.0) };
                     self.centered_text(canvas, &fitted, Rect { top, bottom: split + self.dp(2.0), ..cap }, size, color, false);
-                    let small = self.sp(if self.kana_keys() { 9.0 } else { 10.0 });
+                    let small = self.sp(if self.rows().len() > 4 { 9.0 } else { 10.0 });
                     let below = Rect { top: split - self.dp(2.0), bottom: cap.bottom - self.dp(2.0), ..cap };
                     self.centered_text(canvas, sound, below, small, theme.text_muted, false);
                 }
@@ -2657,6 +2738,33 @@ mod tests {
     }
 
     #[test]
+    fn bopomofo_keyboard() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.apply_settings(Settings { languages: [true; MODES.len()], ..Settings::default() });
+        let height = kb.height();
+        kb.set_mode(Mode::ChineseBopomofo, &mut editor, &mut host);
+        assert!(kb.height() > height, "five rows of keys");
+        assert!(kb.keys.iter().take(44).all(|k| (k.rect.width() - kb.keys[0].rect.width()).abs() < 0.5), "a grid");
+        assert_eq!((romanization("ㄓ"), romanization("ˇ")), (Some("zh"), Some("ǎ")));
+        for key in ["ㄋ", "ㄧ", "ˇ", "ㄏ", "ㄠ", "ˇ"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        assert_eq!(kb.composing_preview(), "ㄋㄧˇㄏㄠˇ");
+        kb.refresh_candidates();
+        assert_eq!(kb.candidates.first().map(String::as_str), Some("你好"));
+        tap_key(&mut kb, KEY_SCRIPT, &mut editor);
+        assert_eq!(kb.label_for(KEY_SPACE), "注音 · 繁體");
+        for key in ["ㄓ", "ㄨ", "ㄥ", "ㄍ", "ㄨ", "ㄛ", "ˊ"] {
+            tap_key(&mut kb, key, &mut editor);
+        }
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        tap_key(&mut kb, "，", &mut editor);
+        assert_eq!(editor.text, "你好中國，");
+    }
+
+    #[test]
     fn chinese_switches_between_simplified_and_traditional() {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
@@ -2758,7 +2866,7 @@ mod tests {
     #[test]
     fn mode_cycle_skips_disabled_languages() {
         let mut kb = keyboard();
-        kb.apply_settings(Settings { languages: [false, true, false, false, false, true, false], ..Default::default() });
+        kb.apply_settings(Settings { languages: MODES.map(|m| matches!(m, Mode::Japanese | Mode::English)), ..Default::default() });
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
         kb.cycle_mode(&mut editor, &mut host);
