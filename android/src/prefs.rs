@@ -1,7 +1,7 @@
 //! Settings, stored in the same `SharedPreferences` file the Java app used, so they survive the upgrade.
 
 use crate::jni::{jobject, Env, Local, Value};
-use crate::keyboard::{Settings, MODES};
+use crate::keyboard::{Mode, Settings, MODES};
 
 const PREFS_NAME: &str = "convoy_pinyin_prefs";
 const KEY_DARK_MODE: &str = "dark_mode"; // before the theme setting existed
@@ -12,19 +12,53 @@ pub const THEME_SYSTEM: &str = "system";
 pub const THEME_LIGHT: &str = "light";
 pub const THEME_DARK: &str = "dark";
 
-/// The on/off settings shown as switches: (preference key, default).
-pub const SWITCHES: [(&str, bool); 9] = [
+/// The on/off settings shown as switches, besides the keyboards: (preference key, default).
+/// Each switch's view is named after its key: `auto_space_toggle`.
+pub const SWITCHES: [(&str, bool); 11] = [
     ("key_vibration", true),
     ("key_popup", true),
     ("number_row_hints", true),
-    ("auto_correct", true),
     ("auto_space", false),
     // Off until the user turns it on; it also needs a model installed.
     ("grammar_button", false),
-    ("normal_space", false),
-    ("romaji_keys", false),
     ("romanize_selection", true),
+    ("auto_correct_english", true),
+    ("auto_correct_malay", true),
+    ("normal_space_chinese", false),
+    ("normal_space_japanese", false),
+    ("chinese_traditional", false),
 ];
+
+/// Settings that replaced an older, shared one start from its value: (new key, old key).
+const REPLACED: [(&str, &str); 6] = [
+    ("auto_correct_english", "auto_correct"),
+    ("auto_correct_malay", "auto_correct"),
+    ("normal_space_chinese", "normal_space"),
+    ("normal_space_japanese", "normal_space"),
+    ("language_japanese_romaji", "romaji_keys"),
+    ("language_korean_romaji", "romaji_keys"),
+];
+
+/// A switch's value: its own preference, else the one it replaced, else `default`.
+pub fn get_switch(env: Env, context: jobject, key: &str, default: bool) -> bool {
+    // Chinese used to be two keyboards, Simplified and Traditional.
+    let simplified = || get_bool(env, context, "language_simplified", true);
+    let traditional = || get_bool(env, context, "language_traditional", true);
+    let default = match key {
+        "language_chinese" => simplified() || traditional(),
+        "chinese_traditional" => !simplified() && traditional(),
+        _ => match REPLACED.iter().find(|(new, _)| *new == key) {
+            Some((_, old)) => get_bool(env, context, old, default),
+            None => default,
+        },
+    };
+    get_bool(env, context, key, default)
+}
+
+/// The preference key that turns a keyboard on, such as `language_japanese_romaji`.
+pub fn keyboard_key(mode: Mode) -> String {
+    format!("{KEY_LANGUAGE_PREFIX}{}", mode.language_key())
+}
 /// The display name of the installed AI model.
 pub const KEY_MODEL_NAME: &str = "grammar_model_name";
 
@@ -146,22 +180,27 @@ pub fn is_dark_mode(env: Env, context: jobject) -> bool {
 }
 
 pub fn load(env: Env, context: jobject) -> Settings {
-    let bool_of = |key: &str, default| get_bool(env, context, key, default);
-    let mut languages = [true; 6];
+    let switch = |key: &str| {
+        let default = SWITCHES.iter().find(|(k, _)| *k == key).is_some_and(|(_, d)| *d);
+        get_switch(env, context, key, default)
+    };
+    let mut languages = [true; MODES.len()];
     for (enabled, mode) in languages.iter_mut().zip(MODES) {
-        *enabled = bool_of(&format!("{KEY_LANGUAGE_PREFIX}{}", mode.language_key()), true);
+        *enabled = get_switch(env, context, &keyboard_key(mode), mode.on_by_default());
     }
     Settings {
         dark: is_dark_mode(env, context),
-        vibration: bool_of(SWITCHES[0].0, SWITCHES[0].1),
-        key_popup: bool_of(SWITCHES[1].0, SWITCHES[1].1),
-        number_hints: bool_of(SWITCHES[2].0, SWITCHES[2].1),
-        auto_correct: bool_of(SWITCHES[3].0, SWITCHES[3].1),
-        auto_space: bool_of(SWITCHES[4].0, SWITCHES[4].1),
-        grammar_button: bool_of(SWITCHES[5].0, SWITCHES[5].1),
-        normal_space: bool_of(SWITCHES[6].0, SWITCHES[6].1),
-        romaji_keys: bool_of(SWITCHES[7].0, SWITCHES[7].1),
-        romanize_selection: bool_of(SWITCHES[8].0, SWITCHES[8].1),
+        vibration: switch("key_vibration"),
+        key_popup: switch("key_popup"),
+        number_hints: switch("number_row_hints"),
+        auto_space: switch("auto_space"),
+        grammar_button: switch("grammar_button"),
+        romanize_selection: switch("romanize_selection"),
+        auto_correct_english: switch("auto_correct_english"),
+        auto_correct_malay: switch("auto_correct_malay"),
+        normal_space_chinese: switch("normal_space_chinese"),
+        normal_space_japanese: switch("normal_space_japanese"),
+        chinese_traditional: switch("chinese_traditional"),
         languages,
     }
 }

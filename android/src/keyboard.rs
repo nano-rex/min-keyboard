@@ -113,28 +113,50 @@ pub trait Canvas {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
-    Simplified,
-    Traditional,
+    /// Pinyin, in Simplified or Traditional characters (the 简⇄繁 key switches).
+    Chinese,
+    /// Japanese on kana keys.
     Japanese,
+    /// Japanese typed in romaji on the ABC keys.
+    JapaneseRomaji,
+    /// Korean on Hangul keys.
     Korean,
+    /// Korean typed in romanization on the ABC keys.
+    KoreanRomaji,
     English,
     Malay,
 }
 
-pub const MODES: [Mode; 6] = [Mode::Simplified, Mode::Traditional, Mode::Japanese, Mode::Korean, Mode::English, Mode::Malay];
+/// Every keyboard, in the order the language key goes through them.
+pub const MODES: [Mode; 7] =
+    [Mode::Chinese, Mode::Japanese, Mode::JapaneseRomaji, Mode::Korean, Mode::KoreanRomaji, Mode::English, Mode::Malay];
 
 impl Mode {
     pub fn is_latin(self) -> bool {
         matches!(self, Mode::English | Mode::Malay)
     }
 
+    pub fn is_japanese(self) -> bool {
+        matches!(self, Mode::Japanese | Mode::JapaneseRomaji)
+    }
+
+    pub fn is_korean(self) -> bool {
+        matches!(self, Mode::Korean | Mode::KoreanRomaji)
+    }
+
+    /// The romaji and romanized keyboards are off until turned on in Settings.
+    pub fn on_by_default(self) -> bool {
+        !matches!(self, Mode::JapaneseRomaji | Mode::KoreanRomaji)
+    }
+
     /// The preference name used by the settings screen.
     pub fn language_key(self) -> &'static str {
         match self {
-            Mode::Simplified => "simplified",
-            Mode::Traditional => "traditional",
+            Mode::Chinese => "chinese",
             Mode::Japanese => "japanese",
+            Mode::JapaneseRomaji => "japanese_romaji",
             Mode::Korean => "korean",
+            Mode::KoreanRomaji => "korean_romaji",
             Mode::Malay => "malay",
             Mode::English => "english",
         }
@@ -144,20 +166,22 @@ impl Mode {
         match self {
             Mode::English => "EN",
             Mode::Malay => "BM",
-            Mode::Traditional => "繁",
-            Mode::Japanese => "日",
+            Mode::Japanese => "あ",
+            Mode::JapaneseRomaji => "日",
             Mode::Korean => "한",
-            Mode::Simplified => "中",
+            Mode::KoreanRomaji => "Ko",
+            Mode::Chinese => "中",
         }
     }
 
     fn space_label(self) -> &'static str {
         match self {
             Mode::Malay => "Bahasa Melayu",
-            Mode::Simplified => "简体中文",
-            Mode::Traditional => "繁體中文",
+            Mode::Chinese => "简体中文",
             Mode::Japanese => "日本語",
+            Mode::JapaneseRomaji => "日本語 · romaji",
             Mode::Korean => "한국어",
+            Mode::KoreanRomaji => "한국어 · romaja",
             Mode::English => "English",
         }
     }
@@ -170,37 +194,41 @@ impl Mode {
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub dark: bool,
-    pub auto_correct: bool,
+    pub auto_correct_english: bool,
+    pub auto_correct_malay: bool,
     pub auto_space: bool,
     pub vibration: bool,
     pub key_popup: bool,
     pub number_hints: bool,
     /// Show the AI check button while text is selected.
     pub grammar_button: bool,
-    /// Space types " " in Chinese and Japanese instead of the full-width U+3000.
-    pub normal_space: bool,
-    /// Japanese and Korean are typed in romaji on the QWERTY keys instead of kana and Hangul keys.
-    pub romaji_keys: bool,
+    /// Space types " " instead of the full-width U+3000, per language.
+    pub normal_space_chinese: bool,
+    pub normal_space_japanese: bool,
+    /// Chinese starts in Traditional characters.
+    pub chinese_traditional: bool,
     /// Show how selected Chinese, Japanese or Korean text is pronounced.
     pub romanize_selection: bool,
     /// Enabled flags, indexed like [`MODES`].
-    pub languages: [bool; 6],
+    pub languages: [bool; MODES.len()],
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             dark: false,
-            auto_correct: true,
+            auto_correct_english: true,
+            auto_correct_malay: true,
             auto_space: false,
             vibration: true,
             key_popup: true,
             number_hints: true,
             grammar_button: false,
-            normal_space: false,
-            romaji_keys: false,
+            normal_space_chinese: false,
+            normal_space_japanese: false,
+            chinese_traditional: false,
             romanize_selection: true,
-            languages: [true; 6],
+            languages: MODES.map(Mode::on_by_default),
         }
     }
 }
@@ -208,6 +236,23 @@ impl Default for Settings {
 impl Settings {
     fn enabled(&self, mode: Mode) -> bool {
         self.languages[mode.index()]
+    }
+
+    fn auto_correct(&self, mode: Mode) -> bool {
+        match mode {
+            Mode::English => self.auto_correct_english,
+            Mode::Malay => self.auto_correct_malay,
+            _ => false,
+        }
+    }
+
+    /// Whether space types " " rather than the full-width U+3000 (Korean always uses " ").
+    fn normal_space(&self, mode: Mode) -> bool {
+        match mode {
+            Mode::Chinese => self.normal_space_chinese,
+            Mode::Japanese | Mode::JapaneseRomaji => self.normal_space_japanese,
+            _ => true,
+        }
     }
 }
 
@@ -319,9 +364,9 @@ impl Engines {
         match mode {
             Mode::English => self.english.get().is_some(),
             Mode::Malay => self.malay.get().is_some(),
-            Mode::Simplified | Mode::Traditional => self.pinyin.get().is_some(),
-            Mode::Japanese => self.japanese.get().is_some(),
-            Mode::Korean => self.korean.get().is_some(),
+            Mode::Chinese => self.pinyin.get().is_some(),
+            Mode::Japanese | Mode::JapaneseRomaji => self.japanese.get().is_some(),
+            Mode::Korean | Mode::KoreanRomaji => self.korean.get().is_some(),
         }
     }
 
@@ -333,9 +378,9 @@ impl Engines {
         let engines = Arc::clone(self);
         let spawned = std::thread::Builder::new().name("min-keyboard-dictionary".into()).spawn(move || {
             match mode {
-                Mode::Simplified | Mode::Traditional => _ = engines.pinyin(true),
-                Mode::Japanese => _ = engines.japanese(true),
-                Mode::Korean => _ = engines.korean(true),
+                Mode::Chinese => _ = engines.pinyin(true),
+                Mode::Japanese | Mode::JapaneseRomaji => _ = engines.japanese(true),
+                Mode::Korean | Mode::KoreanRomaji => _ = engines.korean(true),
                 Mode::English | Mode::Malay => _ = engines.latin(mode, true),
             }
             (engines.on_loaded)();
@@ -346,18 +391,17 @@ impl Engines {
     }
 
     /// Candidates for the input, or `None` while the dictionary is still loading (unless `block`).
-    pub fn candidates(&self, mode: Mode, input: &str, block: bool) -> Option<Vec<String>> {
+    /// `script` is the characters Chinese is shown in.
+    pub fn candidates(&self, mode: Mode, script: ScriptMode, input: &str, block: bool) -> Option<Vec<String>> {
         if input.is_empty() {
             return Some(Vec::new());
         }
         Some(match mode {
             Mode::English | Mode::Malay => self.latin(mode, block)?.candidates(input),
-            Mode::Japanese => self.japanese(block)?.candidates(input),
-            // Keys from the Hangul keyboard, or romanized Korean.
-            Mode::Korean if input.starts_with(korean::is_jamo_key) => self.korean(block)?.key_candidates(input),
-            Mode::Korean => self.korean(block)?.candidates(input),
-            Mode::Traditional => self.pinyin(block)?.candidates(input, ScriptMode::Traditional),
-            Mode::Simplified => self.pinyin(block)?.candidates(input, ScriptMode::Simplified),
+            Mode::Japanese | Mode::JapaneseRomaji => self.japanese(block)?.candidates(input),
+            Mode::Korean => self.korean(block)?.key_candidates(input),
+            Mode::KoreanRomaji => self.korean(block)?.candidates(input),
+            Mode::Chinese => self.pinyin(block)?.candidates(input, script),
         })
     }
 
@@ -386,13 +430,17 @@ const ROW2: &[&str] = &["a", "s", "d", "f", "g", "h", "j", "k", "l"];
 const ROW3: &[&str] = &[KEY_SHIFT, "z", "x", "c", "v", "b", "n", "m", KEY_BACKSPACE];
 const ROW4: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, ".", KEY_ENTER];
 const ROW4_JAPANESE: &[&str] = &[KEY_SYMBOLS, ",", KEY_SPACE, "ー", ".", KEY_ENTER];
+const ROW4_CHINESE: &[&str] = &[KEY_SYMBOLS, KEY_SCRIPT, ",", KEY_SPACE, ".", KEY_ENTER];
 const QWERTY: [&[&str]; 4] = [ROW1, ROW2, ROW3, ROW4];
 const QWERTY_JAPANESE: [&[&str]; 4] = [ROW1, ROW2, ROW3, ROW4_JAPANESE];
+const QWERTY_CHINESE: [&[&str]; 4] = [ROW1, ROW2, ROW3, ROW4_CHINESE];
 
 const KEY_DAKUTEN: &str = "゛";
 const KEY_HANDAKUTEN: &str = "゜";
 const KEY_SMALL: &str = "小";
 const KEY_KATAKANA: &str = "あ⇄ア";
+/// Switches Chinese between Simplified and Traditional characters.
+const KEY_SCRIPT: &str = "简⇄繁";
 
 /// Japanese kana in gojūon order: one consonant per column, the vowels a i u e o down the rows.
 const KANA: [&[&str]; 6] = [
@@ -605,7 +653,16 @@ const TYPE_NULL: i32 = 0;
 fn is_function_key(key: &str) -> bool {
     matches!(
         key,
-        KEY_SHIFT | KEY_BACKSPACE | KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA | KEY_DAKUTEN | KEY_HANDAKUTEN | KEY_SMALL
+        KEY_SHIFT
+            | KEY_BACKSPACE
+            | KEY_SYMBOLS
+            | KEY_LETTERS
+            | KEY_MORE_SYMBOLS
+            | KEY_KATAKANA
+            | KEY_SCRIPT
+            | KEY_DAKUTEN
+            | KEY_HANDAKUTEN
+            | KEY_SMALL
     )
 }
 
@@ -777,6 +834,8 @@ pub struct Keyboard {
     suggestions_expanded: bool,
     /// The kana keys type katakana.
     katakana: bool,
+    /// The characters Chinese is typed in; starts from the setting, and the 简⇄繁 key switches it.
+    script: ScriptMode,
     /// ゛, ゜ or 小 while it changes the kana keys; like Shift, it lasts one kana unless locked.
     kana_modifier: Option<(&'static str, Shift)>,
     kana_modifier_tapped: Option<Instant>,
@@ -806,6 +865,7 @@ pub struct Keyboard {
 impl Keyboard {
     pub fn new(engines: Arc<Engines>, settings: Settings, density: f32, scaled_density: f32) -> Self {
         engines.preload(Mode::English);
+        let script = if settings.chinese_traditional { ScriptMode::Traditional } else { ScriptMode::Simplified };
         let mut keyboard = Keyboard {
             engines,
             theme: theme::of(settings.dark),
@@ -824,6 +884,7 @@ impl Keyboard {
             symbols_page_two: false,
             suggestions_expanded: false,
             katakana: false,
+            script,
             kana_modifier: None,
             kana_modifier_tapped: None,
             keys: Vec::new(),
@@ -881,6 +942,10 @@ impl Keyboard {
     /// Settings may have changed while the keyboard was hidden (theme, hints, languages).
     pub fn apply_settings(&mut self, settings: Settings) {
         self.theme = theme::of(settings.dark);
+        // The 简⇄繁 key's choice lasts until the setting itself changes.
+        if settings.chinese_traditional != self.settings.chinese_traditional {
+            self.script = if settings.chinese_traditional { ScriptMode::Traditional } else { ScriptMode::Simplified };
+        }
         self.settings = settings;
         self.rebuild();
         self.candidates_dirty = true;
@@ -936,14 +1001,14 @@ impl Keyboard {
         self.dp(4.0 + 44.0 + 2.0 + 6.0) + self.keys_height()
     }
 
-    /// Japanese and Korean show kana and Hangul keys, unless the user types them in romaji.
+    /// The Japanese and Korean keyboards with kana and Hangul keys (not the romaji ones).
     fn native_keys(&self) -> bool {
-        matches!(self.mode, Mode::Japanese | Mode::Korean) && !self.settings.romaji_keys
+        matches!(self.mode, Mode::Japanese | Mode::Korean)
     }
 
     /// The kana keyboard has six rows of keys, so it is taller (its symbol pages too).
     fn kana_keys(&self) -> bool {
-        self.mode == Mode::Japanese && self.native_keys()
+        self.mode == Mode::Japanese
     }
 
     fn keys_height(&self) -> f32 {
@@ -979,8 +1044,9 @@ impl Keyboard {
         let latin = self.mode.is_latin();
         match (self.symbols_mode, latin, self.symbols_page_two) {
             (false, _, _) if self.kana_keys() => &KANA,
-            (false, _, _) if self.mode == Mode::Korean && self.native_keys() => &HANGUL,
-            (false, _, _) if self.mode == Mode::Japanese => &QWERTY_JAPANESE,
+            (false, _, _) if self.mode == Mode::Korean => &HANGUL,
+            (false, _, _) if self.mode == Mode::JapaneseRomaji => &QWERTY_JAPANESE,
+            (false, _, _) if self.mode == Mode::Chinese => &QWERTY_CHINESE,
             (false, _, _) => &QWERTY,
             (true, true, false) => &EN_SYMBOLS,
             (true, true, true) => &EN_SYMBOLS_2,
@@ -1018,12 +1084,13 @@ impl Keyboard {
     fn label_for(&self, key: &str) -> String {
         let latin = self.mode.is_latin();
         match key {
-            "," | "." if latin || self.mode == Mode::Korean => key.into(),
-            "," if self.mode == Mode::Japanese => "、".into(),
+            "," | "." if latin || self.mode.is_korean() => key.into(),
+            "," if self.mode.is_japanese() => "、".into(),
             "," => "，".into(),
             "." => "。".into(),
             KEY_SHIFT if self.shift == Shift::Locked => "⇪".into(),
             KEY_SHIFT => "⇧".into(),
+            KEY_SPACE if self.mode == Mode::Chinese && self.script == ScriptMode::Traditional => "繁體中文".into(),
             KEY_SPACE => self.mode.space_label().into(),
             KEY_ENTER => "↵".into(),
             KEY_BACKSPACE => "⌫".into(),
@@ -1096,6 +1163,13 @@ impl Keyboard {
                 self.katakana = !self.katakana;
                 self.schedule_refresh(host);
             }
+            KEY_SCRIPT => {
+                self.script = match self.script {
+                    ScriptMode::Simplified => ScriptMode::Traditional,
+                    ScriptMode::Traditional => ScriptMode::Simplified,
+                };
+                self.schedule_refresh(host);
+            }
             KEY_DAKUTEN | KEY_HANDAKUTEN | KEY_SMALL if self.kana_keys() => {
                 let modifier = [KEY_DAKUTEN, KEY_HANDAKUTEN, KEY_SMALL].into_iter().find(|&m| m == key).unwrap_or(KEY_DAKUTEN);
                 let double_tap = self.kana_modifier_tapped.is_some_and(|at| at.elapsed().as_millis() < DOUBLE_TAP_MS);
@@ -1163,7 +1237,7 @@ impl Keyboard {
             self.kana_modifier = None;
         }
         // The long-vowel mark continues the word being typed ("ra-men" is らーめん).
-        if self.mode == Mode::Japanese && !self.native_keys() && ch == 'ー' && !self.composing.is_empty() {
+        if self.mode == Mode::JapaneseRomaji && ch == 'ー' && !self.composing.is_empty() {
             self.composing.push('-');
             self.schedule_refresh(host);
             return;
@@ -1186,8 +1260,8 @@ impl Keyboard {
     /// Whether a typed character belongs to the word being composed.
     fn is_composing_char(&self, ch: char) -> bool {
         match self.mode {
-            Mode::Japanese if self.native_keys() => ('ぁ'..='ゖ').contains(&ch) || ('ァ'..='ヶ').contains(&ch) || ch == 'ー',
-            Mode::Korean if self.native_keys() => korean::is_jamo_key(ch),
+            Mode::Japanese => ('ぁ'..='ゖ').contains(&ch) || ('ァ'..='ヶ').contains(&ch) || ch == 'ー',
+            Mode::Korean => korean::is_jamo_key(ch),
             _ => ch.is_ascii_alphabetic() || ch == '\'',
         }
     }
@@ -1214,8 +1288,7 @@ impl Keyboard {
         } else if !self.composing.is_empty() {
             self.commit_top_candidate(editor, host);
         } else {
-            let normal = self.mode == Mode::Korean || self.settings.normal_space;
-            editor.commit_text(if normal { " " } else { "\u{3000}" });
+            editor.commit_text(if self.settings.normal_space(self.mode) { " " } else { "\u{3000}" });
         }
     }
 
@@ -1250,7 +1323,7 @@ impl Keyboard {
         }
         let typed = self.composing.clone();
         let mut word = typed.clone();
-        if allow_correction && self.settings.auto_correct {
+        if allow_correction && self.settings.auto_correct(self.mode) {
             if let Some(fix) = self.engines.auto_correction(self.mode, &typed) {
                 word = match_case(&fix, &typed, self.shift);
             }
@@ -1323,7 +1396,7 @@ impl Keyboard {
 
     /// The engine's candidates; the katakana key puts the katakana spelling first.
     fn fetch_candidates(&self, block: bool) -> Option<Vec<String>> {
-        let mut candidates = self.engines.candidates(self.mode, &self.composing, block)?;
+        let mut candidates = self.engines.candidates(self.mode, self.script, &self.composing, block)?;
         if self.kana_keys() && self.katakana && !self.composing.is_empty() {
             let katakana = self.composing_preview();
             candidates.retain(|c| *c != katakana);
@@ -1344,9 +1417,9 @@ impl Keyboard {
     fn composing_preview(&self) -> String {
         match self.mode {
             Mode::Japanese if self.kana_keys() && self.katakana => japanese::to_katakana(&self.composing),
-            Mode::Japanese => japanese::to_hiragana(&self.composing, false),
-            Mode::Korean if self.composing.starts_with(korean::is_jamo_key) => korean::compose_keys(&self.composing),
-            Mode::Korean => korean::compose(&self.composing).unwrap_or_else(|| self.composing.clone()),
+            Mode::Japanese | Mode::JapaneseRomaji => japanese::to_hiragana(&self.composing, false),
+            Mode::Korean => korean::compose_keys(&self.composing),
+            Mode::KoreanRomaji => korean::compose(&self.composing).unwrap_or_else(|| self.composing.clone()),
             _ => self.composing.clone(),
         }
     }
@@ -1748,7 +1821,7 @@ impl Keyboard {
         }
         self.romanized_generation = Some(generation);
         let Some(text) = self.selected_text.as_deref().filter(|_| self.settings.romanize_selection) else { return };
-        self.romanized = self.engines.romanize(text, self.mode == Mode::Japanese, false);
+        self.romanized = self.engines.romanize(text, self.mode.is_japanese(), false);
     }
 
     fn romanization_visible(&self) -> bool {
@@ -1840,7 +1913,7 @@ impl Keyboard {
         self.grammar_requests += 1;
         let request = self.grammar_requests;
         let mut language = grammar::detect_language(&text, self.mode == Mode::Malay);
-        let chinese_mode = matches!(self.mode, Mode::Simplified | Mode::Traditional);
+        let chinese_mode = self.mode == Mode::Chinese;
         if chinese_mode && text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
             language = Language::Mandarin;
         }
@@ -2142,9 +2215,11 @@ impl Keyboard {
             } else if enter {
                 (self.sp(20.0), theme.accent_text)
             } else if function {
-                let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA);
-                let on =
-                    (key.key == KEY_SHIFT && self.shift != Shift::Off) || (key.key == KEY_KATAKANA && self.katakana) || modifier.is_some();
+                let small = matches!(key.key, KEY_SYMBOLS | KEY_LETTERS | KEY_MORE_SYMBOLS | KEY_KATAKANA | KEY_SCRIPT);
+                let on = (key.key == KEY_SHIFT && self.shift != Shift::Off)
+                    || (key.key == KEY_KATAKANA && self.katakana)
+                    || (key.key == KEY_SCRIPT && self.script == ScriptMode::Traditional)
+                    || modifier.is_some();
                 (self.sp(if small { 15.0 } else { 20.0 }), if on { theme.accent } else { theme.text })
             } else if self.kana_keys() && !self.symbols_mode {
                 // While ゛, ゜ or 小 is on, kana without that form are dimmed (they still type).
@@ -2412,9 +2487,10 @@ mod tests {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
-        kb.apply_settings(Settings { romaji_keys: true, ..Settings::default() });
+        kb.apply_settings(Settings { languages: [true; MODES.len()], ..Settings::default() });
         kb.engines.japanese(true);
-        kb.set_mode(Mode::Japanese, &mut editor, &mut host);
+        kb.set_mode(Mode::JapaneseRomaji, &mut editor, &mut host);
+        assert_eq!(kb.rows(), &QWERTY_JAPANESE);
         type_text(&mut kb, "ra", &mut editor);
         tap_key(&mut kb, "ー", &mut editor);
         type_text(&mut kb, "menn", &mut editor);
@@ -2440,7 +2516,7 @@ mod tests {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
-        kb.set_mode(Mode::Simplified, &mut editor, &mut host);
+        kb.set_mode(Mode::Chinese, &mut editor, &mut host);
         type_text(&mut kb, "woaini", &mut editor);
         assert_eq!(editor.text, "", "pinyin is not shown in the editor while composing");
         tap_key(&mut kb, KEY_SPACE, &mut editor);
@@ -2568,12 +2644,75 @@ mod tests {
         let mut kb = keyboard();
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
-        kb.set_mode(Mode::Simplified, &mut editor, &mut host);
+        kb.set_mode(Mode::Chinese, &mut editor, &mut host);
         tap_key(&mut kb, KEY_SPACE, &mut editor);
         assert_eq!(editor.text, "\u{3000}");
-        kb.apply_settings(Settings { normal_space: true, ..Settings::default() });
+        kb.apply_settings(Settings { normal_space_chinese: true, ..Settings::default() });
         tap_key(&mut kb, KEY_SPACE, &mut editor);
         assert_eq!(editor.text, "\u{3000} ");
+        // The setting is per language: Japanese still types the wide space.
+        kb.set_mode(Mode::Japanese, &mut editor, &mut host);
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "\u{3000} \u{3000}");
+    }
+
+    #[test]
+    fn chinese_switches_between_simplified_and_traditional() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        kb.set_mode(Mode::Chinese, &mut editor, &mut host);
+        assert_eq!(kb.rows(), &QWERTY_CHINESE);
+        type_text(&mut kb, "zhongguo", &mut editor);
+        kb.refresh_candidates();
+        assert_eq!(kb.candidates.first().map(String::as_str), Some("中国"));
+        tap_key(&mut kb, KEY_SCRIPT, &mut editor);
+        assert_eq!(kb.label_for(KEY_SPACE), "繁體中文");
+        kb.refresh_candidates();
+        assert_eq!(kb.candidates.first().map(String::as_str), Some("中國"));
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "中國");
+        // The choice stays when the keyboard is shown again with the same settings...
+        kb.apply_settings(Settings::default());
+        assert_eq!(kb.script, ScriptMode::Traditional);
+        // ...and the setting decides where it starts.
+        kb.apply_settings(Settings { chinese_traditional: true, ..Settings::default() });
+        kb.apply_settings(Settings::default());
+        assert_eq!(kb.script, ScriptMode::Simplified);
+    }
+
+    #[test]
+    fn romaji_keyboards_are_separate_and_settings_are_per_language() {
+        let mut kb = keyboard();
+        let mut editor = FakeEditor::default();
+        let mut host = FakeHost::default();
+        let cycle = |kb: &mut Keyboard, editor: &mut FakeEditor, host: &mut FakeHost| {
+            (0..MODES.len())
+                .map(|_| {
+                    kb.cycle_mode(editor, host);
+                    kb.mode
+                })
+                .collect::<Vec<_>>()
+        };
+        // Off by default: the language key skips them.
+        let modes = cycle(&mut kb, &mut editor, &mut host);
+        assert!(!modes.contains(&Mode::JapaneseRomaji) && !modes.contains(&Mode::KoreanRomaji));
+        kb.apply_settings(Settings { languages: [true; MODES.len()], ..Settings::default() });
+        let modes = cycle(&mut kb, &mut editor, &mut host);
+        assert!(modes.contains(&Mode::JapaneseRomaji) && modes.contains(&Mode::KoreanRomaji));
+
+        kb.engines.korean(true);
+        kb.set_mode(Mode::KoreanRomaji, &mut editor, &mut host);
+        type_text(&mut kb, "hanguk", &mut editor);
+        assert_eq!(kb.composing_preview(), "한국");
+        tap_key(&mut kb, KEY_SPACE, &mut editor);
+        assert_eq!(editor.text, "한국");
+
+        // Auto-correct is per language.
+        kb.apply_settings(Settings { auto_correct_english: false, ..Settings::default() });
+        kb.set_mode(Mode::English, &mut editor, &mut host);
+        type_text(&mut kb, " teh ", &mut editor);
+        assert_eq!(editor.text, "한국 teh ");
     }
 
     #[test]
@@ -2619,7 +2758,7 @@ mod tests {
     #[test]
     fn mode_cycle_skips_disabled_languages() {
         let mut kb = keyboard();
-        kb.apply_settings(Settings { languages: [false, false, true, false, true, false], ..Default::default() });
+        kb.apply_settings(Settings { languages: [false, true, false, false, false, true, false], ..Default::default() });
         let mut editor = FakeEditor::default();
         let mut host = FakeHost::default();
         kb.cycle_mode(&mut editor, &mut host);

@@ -7,7 +7,7 @@ language model that runs entirely on the device. Nothing is sent anywhere.
 
 The check is **off by default** and never runs while you type.
 
-1. Open **Min Keyboard** settings → **AI grammar check** and tap **Check this
+1. Open **Min Keyboard** settings → **AI grammar check ›** and tap **Check this
    device**. It shows how much RAM and how many cores the AI may use, and which
    model fits.
 2. Tap **Download …** to get the model file in your browser. Min Keyboard itself

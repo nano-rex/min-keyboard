@@ -1,6 +1,8 @@
 //! The settings screen. Its layout is `res/layout/activity_setup.xml`; this module binds the
-//! buttons and switches to the preferences the keyboard reads.
+//! buttons and switches to the preferences the keyboard reads. Languages and the AI grammar
+//! check have pages of their own, shown in place of the main page.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use crate::jni::{jint, jobject, Env, Global, JResult, Local, RawEnv, Value};
@@ -10,6 +12,9 @@ use crate::{guard, log_error, prefs, setup_ai, CALLBACK_CLASS};
 const OPEN_INPUT_SETTINGS: i64 = 100;
 const OPEN_INPUT_PICKER: i64 = 101;
 const THEME_GROUP: i64 = 102;
+const OPEN_LANGUAGES: i64 = 103;
+const OPEN_AI: i64 = 104;
+const BACK: i64 = 105;
 /// Switches use `SWITCH_BASE + index` into [`switches`].
 const SWITCH_BASE: i64 = 200;
 
@@ -22,28 +27,42 @@ pub fn with_activity<R>(f: impl FnOnce(jobject) -> R) -> Option<R> {
     ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|activity| f(activity.0))
 }
 
-/// Every switch on the screen: (view id, preference key, default).
-fn switches() -> Vec<(String, String, bool)> {
-    let mut all: Vec<(String, String, bool)> = [
-        "vibration_toggle",
-        "popup_toggle",
-        "number_hints_toggle",
-        "auto_correct_toggle",
-        "auto_space_toggle",
-        "grammar_button_toggle",
-        "normal_space_toggle",
-        "romaji_keys_toggle",
-        "romanize_selection_toggle",
-    ]
-    .iter()
-    .zip(prefs::SWITCHES)
-    .map(|(id, (key, default))| (id.to_string(), key.to_string(), default))
-    .collect();
-    for mode in MODES {
-        let language = mode.language_key();
-        all.push((format!("language_{language}_toggle"), format!("{}{language}", prefs::KEY_LANGUAGE_PREFIX), true));
-    }
+/// The buttons of this module: (view id, callback id).
+const BUTTONS: [(&str, i64); 6] = [
+    ("open_input_settings", OPEN_INPUT_SETTINGS),
+    ("open_input_picker", OPEN_INPUT_PICKER),
+    ("open_languages", OPEN_LANGUAGES),
+    ("open_ai", OPEN_AI),
+    ("back_from_languages", BACK),
+    ("back_from_ai", BACK),
+];
+
+/// The pages of the screen, by the id of their container.
+const PAGES: [&str; 3] = ["page_main", "page_languages", "page_ai"];
+/// The page shown, as an index into [`PAGES`]; kept when the activity is recreated.
+static PAGE: AtomicU8 = AtomicU8::new(0);
+
+/// Every switch on the screen: (preference key, default). Its view is `<key>_toggle`.
+fn switches() -> Vec<(String, bool)> {
+    let mut all: Vec<(String, bool)> = prefs::SWITCHES.iter().map(|&(key, default)| (key.to_string(), default)).collect();
+    all.extend(MODES.map(|mode| (prefs::keyboard_key(mode), mode.on_by_default())));
     all
+}
+
+/// Shows one page and hides the others, scrolled to the top.
+fn show_page(env: Env, activity: jobject, page: u8) {
+    PAGE.store(page, Ordering::SeqCst);
+    const VISIBLE: i32 = 0;
+    const GONE: i32 = 8;
+    for (i, name) in PAGES.iter().enumerate() {
+        if let Ok(view) = find_view(env, activity, name) {
+            let visibility = if i == page as usize { VISIBLE } else { GONE };
+            let _ = env.call(view.obj, "setVisibility", "(I)V", &[Value::Int(visibility)]);
+        }
+    }
+    if let Ok(scroll) = find_view(env, activity, "settings_scroll") {
+        let _ = env.call(scroll.obj, "scrollTo", "(II)V", &[Value::Int(0), Value::Int(0)]);
+    }
 }
 
 fn resource_id(env: Env, context: jobject, name: &str, kind: &str) -> JResult<i32> {
@@ -69,8 +88,7 @@ pub fn callback(env: Env, id: i64) -> JResult<Local> {
 }
 
 fn bind(env: Env, activity: jobject) -> JResult<()> {
-    let buttons = [("open_input_settings", OPEN_INPUT_SETTINGS), ("open_input_picker", OPEN_INPUT_PICKER)];
-    for (name, id) in buttons.into_iter().chain(setup_ai::BUTTONS) {
+    for (name, id) in BUTTONS.into_iter().chain(setup_ai::BUTTONS) {
         let button = find_view(env, activity, name)?;
         let listener = callback(env, id)?;
         env.call(button.obj, "setOnClickListener", "(Landroid/view/View$OnClickListener;)V", &[Value::Obj(listener.obj)])?;
@@ -91,9 +109,9 @@ fn bind(env: Env, activity: jobject) -> JResult<()> {
         &[Value::Obj(listener.obj)],
     )?;
 
-    for (index, (name, key, default)) in switches().iter().enumerate() {
-        let switch = find_view(env, activity, name)?;
-        env.call(switch.obj, "setChecked", "(Z)V", &[Value::Bool(prefs::get_bool(env, activity, key, *default))])?;
+    for (index, (key, default)) in switches().iter().enumerate() {
+        let switch = find_view(env, activity, &format!("{key}_toggle"))?;
+        env.call(switch.obj, "setChecked", "(Z)V", &[Value::Bool(prefs::get_switch(env, activity, key, *default))])?;
         let listener = callback(env, SWITCH_BASE + index as i64)?;
         env.call(
             switch.obj,
@@ -122,6 +140,20 @@ pub extern "system" fn on_create(raw: RawEnv, this: jobject, saved_state: jobjec
         let Ok(layout) = resource_id(env, this, "activity_setup", "layout") else { return };
         if env.call(this, "setContentView", "(I)V", &[Value::Int(layout)]).is_ok() && bind(env, this).is_err() {
             log_error("cannot set up the settings screen");
+        }
+        // A fresh start opens the main page; a recreated screen (after a theme change) stays put.
+        show_page(env, this, if saved_state.is_null() { 0 } else { PAGE.load(Ordering::SeqCst) });
+    })
+}
+
+/// Back returns from a page to the main page, and from there leaves the screen.
+pub extern "system" fn on_back_pressed(raw: RawEnv, this: jobject) {
+    guard((), || {
+        let env = unsafe { Env::from_raw(raw) };
+        if PAGE.load(Ordering::SeqCst) != 0 {
+            show_page(env, this, 0);
+        } else {
+            let _ = env.call_super(this, "android/app/Activity", "onBackPressed", "()V", &[]);
         }
     })
 }
@@ -152,13 +184,21 @@ pub fn on_click(env: Env, id: i64, view: jobject) {
                 let _ = env.call(manager.obj, "showInputMethodPicker", "()V", &[]);
             }
         }
+        OPEN_LANGUAGES | OPEN_AI | BACK => {
+            let page = match id {
+                OPEN_LANGUAGES => 1,
+                OPEN_AI => 2,
+                _ => 0,
+            };
+            with_activity(|activity| show_page(env, activity, page));
+        }
         id => setup_ai::on_click(env, id, context.obj),
     }
 }
 
 pub fn on_switch(env: Env, id: i64, button: jobject, checked: bool) {
     let Some(context) = context_of(env, button) else { return };
-    if let Some((_, key, _)) = usize::try_from(id - SWITCH_BASE).ok().and_then(|i| switches().into_iter().nth(i)) {
+    if let Some((key, _)) = usize::try_from(id - SWITCH_BASE).ok().and_then(|i| switches().into_iter().nth(i)) {
         prefs::set_bool(env, context.obj, &key, checked);
     }
 }
@@ -198,4 +238,35 @@ pub extern "system" fn on_activity_result(raw: RawEnv, this: jobject, request: j
         let _ = env.call_super(this, "android/app/Activity", "onActivityResult", "(IILandroid/content/Intent;)V", &args);
         setup_ai::on_activity_result(env, this, request, result, data);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The view ids in the settings layout.
+    fn layout_ids() -> Vec<&'static str> {
+        include_str!("../res/layout/activity_setup.xml").split("@+id/").skip(1).filter_map(|rest| rest.split('"').next()).collect()
+    }
+
+    #[test]
+    fn every_view_the_code_uses_is_in_the_layout() {
+        let ids = layout_ids();
+        let switches = switches().into_iter().map(|(key, _)| format!("{key}_toggle"));
+        let buttons = BUTTONS.iter().chain(&setup_ai::BUTTONS).map(|(name, _)| name.to_string());
+        let others = PAGES.iter().chain(&["settings_scroll", "theme_group", "theme_system", "theme_light", "theme_dark"]);
+        let others = others.chain(&["device_report", "ai_status", "ai_progress"]).map(|name| name.to_string());
+        for name in switches.chain(buttons).chain(others) {
+            assert!(ids.contains(&name.as_str()), "{name} is not in activity_setup.xml");
+        }
+    }
+
+    #[test]
+    fn every_switch_in_the_layout_is_a_setting() {
+        let keys: Vec<String> = switches().into_iter().map(|(key, _)| format!("{key}_toggle")).collect();
+        for id in layout_ids().into_iter().filter(|id| id.ends_with("_toggle")) {
+            assert!(keys.iter().any(|key| key == id), "{id} has no setting");
+        }
+        assert_eq!(keys.len(), prefs::SWITCHES.len() + MODES.len());
+    }
 }

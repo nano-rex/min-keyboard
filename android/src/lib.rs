@@ -798,6 +798,7 @@ pub extern "system" fn JNI_OnLoad(vm: RawVm, _reserved: *mut c_void) -> jint {
             vec![
                 ("onCreate", "(Landroid/os/Bundle;)V", f(setup::on_create as *const ())),
                 ("onActivityResult", "(IILandroid/content/Intent;)V", f(setup::on_activity_result as *const ())),
+                ("onBackPressed", "()V", f(setup::on_back_pressed as *const ())),
             ],
         ),
         (

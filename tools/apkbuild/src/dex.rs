@@ -548,6 +548,7 @@ pub fn min_keyboard_classes() -> Vec<Class> {
             forwarding_init("Landroid/app/Activity;", &[]),
             native("onCreate", "V", &["Landroid/os/Bundle;"]),
             native("onActivityResult", "V", &["I", "I", "Landroid/content/Intent;"]),
+            native("onBackPressed", "V", &[]),
         ],
     };
     let keyboard_view = Class {

@@ -15,16 +15,17 @@ Gradle or Kotlin. See [How the Android build works](#how-the-android-build-works
 | --- | --- | --- |
 | English | Completions ranked by frequency, typo correction (`teh` → the, `recieve` → receive), contractions (`dont` → don't), shortcuts (`wdym`) | ~74,000 words |
 | Malay | Completions and typo correction (`bagaimna` → bagaimana) | ~50,000 words |
-| Chinese (简/繁) | Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
-| Japanese | Kana keys in gojūon order, each with its romaji underneath, with ゛ ゜ 小 keys that switch the keys to voiced, p- and small kana (for one kana, or until tapped again after a double tap), a ー key and a hiragana/katakana switch; kanji conversion (にほん → 日本). Romaji on the ABC keys is a setting (`nihon` → 日本) | 131,000 readings (SKK) |
-| Korean | Two-set (Dubeolsik) Hangul keys, each with its romanization underneath, composed into syllables, with word completions. Romanization on the ABC keys is a setting (`gamsahamnida` → 감사합니다) | 97,000 keys |
+| Chinese (简/繁) | One keyboard for Simplified and Traditional characters, with a 简⇄繁 key. Pinyin with the most common characters first (`wo` → 我, `de` → 的), whole sentences (`woaini` → 我爱你, `jintiantianqihenhao` → 今天天气很好), abbreviations (`bzd` → 不知道) | 177,000 pinyin keys |
+| Japanese | Kana keys in gojūon order, each with its romaji underneath, with ゛ ゜ 小 keys that switch the keys to voiced, p- and small kana (for one kana, or until tapped again after a double tap), a ー key and a hiragana/katakana switch; kanji conversion (にほん → 日本). A separate romaji keyboard types on the ABC keys (`nihon` → 日本) | 131,000 readings (SKK) |
+| Korean | Two-set (Dubeolsik) Hangul keys, each with its romanization underneath, composed into syllables, with word completions. A separate romanized keyboard types on the ABC keys (`gamsahamnida` → 감사합니다) | 97,000 keys |
 
 - **Look and feel.** Rounded keys with depth, light, dark or system theme, key previews, haptic
   feedback, long-press on the top row for digits, highlighted best suggestion, and the language
   name on the space bar.
 - Shift capitalises the next letter only; tap it twice to lock capitals (⇪).
 - **Pronunciation of selected text.** Select Chinese, Japanese or Korean text and the bar above the keys shows its pinyin (with tone marks), romaji or romanization; tap it to see it all, or to type it in place of the selection.
-- Symbol pages, an expandable suggestion panel, auto-space, and per-language enable switches.
+- Symbol pages, an expandable suggestion panel and auto-space.
+- **Settings** has a page for languages and keyboards, where each keyboard is turned on or off and auto-correct (English, Malay) and the normal space (Chinese, Japanese) are set per language, and a page for the AI grammar check.
 - Space types the full-width 　 in Chinese and Japanese; a setting switches it to a normal space.
 - **Optional AI grammar check** for English, Mandarin and Malay, off by default. Select some
   text and tap **✓ Check grammar** above the keys; the keyboard shows the changes and replaces

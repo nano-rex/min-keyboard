@@ -4,15 +4,15 @@ version = 4
 
 [[package]]
 name = "apkbuild"
-version = "0.3.3"
+version = "0.3.4"
 
 [[package]]
 name = "dicttool"
-version = "0.3.3"
+version = "0.3.4"
 
 [[package]]
 name = "min-keyboard-android"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "min-keyboard-engines",
  "min-keyboard-grammar",
@@ -20,8 +20,8 @@ dependencies = [
 
 [[package]]
 name = "min-keyboard-engines"
-version = "0.3.3"
+version = "0.3.4"
 
 [[package]]
 name = "min-keyboard-grammar"
-version = "0.3.3"
+version = "0.3.4"
