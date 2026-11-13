@@ -1,0 +1,13 @@
+[package]
+name = "min-keyboard-desktop"
+description = "Min Keyboard for the Linux desktop: an input method server for X11 (XIM) and Wayland (input-method-v2)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "min-keyboard-ime"
+path = "src/main.rs"
+
+[dependencies]
+min-keyboard-engines = { path = "../engines" }

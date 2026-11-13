@@ -19,6 +19,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "min-keyboard-desktop"
+version = "0.3.5"
+dependencies = [
+ "min-keyboard-engines",
+]
+
+[[package]]
 name = "min-keyboard-engines"
 version = "0.3.5"
 
