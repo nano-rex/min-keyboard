@@ -1,9 +1,10 @@
-//! Min Keyboard for the Linux desktop. Work in progress: the input logic is done and tested;
-//! the X11 (XIM) and Wayland (input-method-v2) servers that use it come next.
+//! Min Keyboard for the Linux desktop. Work in progress.
 #![allow(dead_code)]
 
 mod core;
+mod font;
 mod keysym;
+mod popup;
 mod session;
 
 fn main() {
