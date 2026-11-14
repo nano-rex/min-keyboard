@@ -516,10 +516,6 @@ impl Fonts {
         self.fonts.is_empty()
     }
 
-    pub fn size(&self) -> f32 {
-        self.size
-    }
-
     pub fn ascent(&self) -> f32 {
         self.fonts.first().map_or(self.size * 0.8, |f| (f.ascent / f.units_per_em * self.size).ceil())
     }
