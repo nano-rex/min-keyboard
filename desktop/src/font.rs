@@ -512,6 +512,7 @@ impl Fonts {
         Fonts::new(fonts, size)
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.fonts.is_empty()
     }
